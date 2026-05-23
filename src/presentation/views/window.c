@@ -55,7 +55,42 @@ struct _AetherWindow {
 
     /* Bookmarks sidebar rows start index */
     int bookmark_row_start;
+
+    /* Tabs */
+    GtkWidget  *tab_view;   /* AdwTabView */
+    GtkWidget  *tab_bar;    /* AdwTabBar  */
+    GArray     *tabs;       /* array of AetherTabSession */
+
+    /* Undo/Redo */
+    GPtrArray  *undo_stack;
+    GPtrArray  *redo_stack;
+
+    /* Recent files model */
+    GtkRecentManager *recent_mgr;
 };
+
+/* Tab session — saved state per tab */
+typedef struct {
+    char      *path;
+    GPtrArray *back;
+    GPtrArray *fwd;
+    char       title[64];
+} AetherTabSession;
+
+/* Undo entry */
+typedef enum { UNDO_TRASH, UNDO_RENAME, UNDO_MOVE } UndoOp;
+typedef struct {
+    UndoOp op;
+    char  *src;
+    char  *dest;  /* restore-to path or original name */
+} UndoEntry;
+
+static void undo_entry_free(gpointer p) {
+    UndoEntry *e = p;
+    g_free(e->src);
+    g_free(e->dest);
+    g_free(e);
+}
 
 G_DEFINE_TYPE(AetherWindow, aether_window, ADW_TYPE_APPLICATION_WINDOW)
 
@@ -69,6 +104,9 @@ static void save_bookmark(const char *path);
 static GtkWidget *make_sidebar_row(const char *name, const char *icon_name);
 static void add_sidebar_separator(AetherWindow *self);
 static void add_sidebar_header(AetherWindow *self, const char *title);
+static void push_undo(AetherWindow *self, UndoOp op, const char *src, const char *dest);
+static void tab_session_save(AetherWindow *self, int idx);
+static void tab_session_restore(AetherWindow *self, int idx);
 
 /* ── CSS loading ── */
 static void load_css(void) {
@@ -994,6 +1032,255 @@ static void save_bookmark(const char *path) {
     g_free(new_contents); g_free(bm_path);
 }
 
+/* ══════════════════════════════════════════════
+   TABS
+   ══════════════════════════════════════════════ */
+
+static void tab_session_free_fields(AetherTabSession *s) {
+    g_free(s->path);
+    if (s->back) g_ptr_array_free(s->back, TRUE);
+    if (s->fwd)  g_ptr_array_free(s->fwd,  TRUE);
+}
+
+static void tab_session_save(AetherWindow *self, int idx) {
+    if (!self->tabs || idx < 0 || (guint)idx >= self->tabs->len) return;
+    AetherTabSession *s = &g_array_index(self->tabs, AetherTabSession, idx);
+    g_free(s->path);
+    s->path = g_strdup(self->current_path);
+    if (s->back) g_ptr_array_free(s->back, TRUE);
+    if (s->fwd)  g_ptr_array_free(s->fwd,  TRUE);
+    /* Clone stacks */
+    s->back = g_ptr_array_new_with_free_func(g_free);
+    s->fwd  = g_ptr_array_new_with_free_func(g_free);
+    for (guint i = 0; i < self->back_stack->len; i++)
+        g_ptr_array_add(s->back, g_strdup(self->back_stack->pdata[i]));
+    for (guint i = 0; i < self->fwd_stack->len; i++)
+        g_ptr_array_add(s->fwd, g_strdup(self->fwd_stack->pdata[i]));
+    /* Title */
+    char *base = g_path_get_basename(self->current_path ?: "/");
+    g_strlcpy(s->title, base, sizeof(s->title));
+    g_free(base);
+}
+
+static void tab_session_restore(AetherWindow *self, int idx) {
+    if (!self->tabs || idx < 0 || (guint)idx >= self->tabs->len) return;
+    AetherTabSession *s = &g_array_index(self->tabs, AetherTabSession, idx);
+    g_ptr_array_set_size(self->back_stack, 0);
+    g_ptr_array_set_size(self->fwd_stack,  0);
+    if (s->back) for (guint i = 0; i < s->back->len; i++)
+        g_ptr_array_add(self->back_stack, g_strdup(s->back->pdata[i]));
+    if (s->fwd) for (guint i = 0; i < s->fwd->len; i++)
+        g_ptr_array_add(self->fwd_stack, g_strdup(s->fwd->pdata[i]));
+    if (s->path)
+        load_directory(self, s->path);
+}
+
+static int current_tab_index(AetherWindow *self) {
+    if (!self->tab_view) return 0;
+    AdwTabPage *page = adw_tab_view_get_selected_page(ADW_TAB_VIEW(self->tab_view));
+    if (!page) return 0;
+    return adw_tab_view_get_page_position(ADW_TAB_VIEW(self->tab_view), page);
+}
+
+static void on_tab_selected(AdwTabView *view, GParamSpec *pspec, gpointer ud) {
+    (void)pspec;
+    AetherWindow *self = AETHER_WINDOW(ud);
+    int idx = current_tab_index(self);
+    tab_session_restore(self, idx);
+    /* Update tab title */
+    AdwTabPage *page = adw_tab_view_get_selected_page(view);
+    if (page && self->current_path) {
+        char *base = g_path_get_basename(self->current_path);
+        adw_tab_page_set_title(page, base);
+        g_free(base);
+    }
+}
+
+static void new_tab(AetherWindow *self, const char *path) {
+    if (!self->tabs) return;
+    AetherTabSession session = { 0 };
+    session.path = g_strdup(path ?: g_get_home_dir());
+    session.back = g_ptr_array_new_with_free_func(g_free);
+    session.fwd  = g_ptr_array_new_with_free_func(g_free);
+    char *base = g_path_get_basename(session.path);
+    g_strlcpy(session.title, base, sizeof(session.title));
+    g_free(base);
+    g_array_append_val(self->tabs, session);
+
+    /* Add tab page to AdwTabView */
+    GtkWidget *placeholder = gtk_label_new("");
+    AdwTabPage *page = adw_tab_view_append(ADW_TAB_VIEW(self->tab_view), placeholder);
+    adw_tab_page_set_title(page, session.title);
+    adw_tab_view_set_selected_page(ADW_TAB_VIEW(self->tab_view), page);
+}
+
+static void close_tab(AetherWindow *self, int idx) {
+    if (!self->tabs || self->tabs->len <= 1) return;
+    AetherTabSession *s = &g_array_index(self->tabs, AetherTabSession, idx);
+    tab_session_free_fields(s);
+    g_array_remove_index(self->tabs, idx);
+
+    AdwTabPage *page = adw_tab_view_get_nth_page(ADW_TAB_VIEW(self->tab_view), idx);
+    if (page) adw_tab_view_close_page(ADW_TAB_VIEW(self->tab_view), page);
+
+    int new_idx = CLAMP(idx - 1, 0, (int)self->tabs->len - 1);
+    tab_session_restore(self, new_idx);
+}
+
+/* Tab action callbacks */
+static gboolean on_new_tab_shortcut(GtkWidget *w, GVariant *a, gpointer ud) {
+    (void)w; (void)a;
+    AetherWindow *self = AETHER_WINDOW(ud);
+    int old_idx = current_tab_index(self);
+    tab_session_save(self, old_idx);
+    new_tab(self, self->current_path);
+    return TRUE;
+}
+
+static gboolean on_close_tab_shortcut(GtkWidget *w, GVariant *a, gpointer ud) {
+    (void)w; (void)a;
+    AetherWindow *self = AETHER_WINDOW(ud);
+    close_tab(self, current_tab_index(self));
+    return TRUE;
+}
+
+/* ══════════════════════════════════════════════
+   UNDO / REDO
+   ══════════════════════════════════════════════ */
+
+static void push_undo(AetherWindow *self, UndoOp op, const char *src, const char *dest) {
+    UndoEntry *e = g_new0(UndoEntry, 1);
+    e->op   = op;
+    e->src  = g_strdup(src);
+    e->dest = g_strdup(dest);
+    g_ptr_array_add(self->undo_stack, e);
+    g_ptr_array_set_size(self->redo_stack, 0); /* clear redo on new action */
+}
+
+static void do_undo(AetherWindow *self) {
+    if (!self->undo_stack || self->undo_stack->len == 0) return;
+    UndoEntry *e = g_ptr_array_steal_index(self->undo_stack,
+                                            self->undo_stack->len - 1);
+    GError *err = NULL;
+    switch (e->op) {
+    case UNDO_TRASH: {
+        /* Restore from trash — locate in trash:// */
+        GFile *trash_file = NULL;
+        GFileEnumerator *en = g_file_enumerate_children(
+            g_file_new_for_uri("trash:///"),
+            G_FILE_ATTRIBUTE_STANDARD_NAME ","
+            G_FILE_ATTRIBUTE_TRASH_ORIG_PATH,
+            G_FILE_QUERY_INFO_NONE, NULL, NULL);
+        if (en) {
+            GFileInfo *info;
+            while ((info = g_file_enumerator_next_file(en, NULL, NULL)) != NULL) {
+                const char *orig = g_file_info_get_attribute_byte_string(
+                                      info, G_FILE_ATTRIBUTE_TRASH_ORIG_PATH);
+                if (orig && g_strcmp0(orig, e->src) == 0) {
+                    const char *name = g_file_info_get_name(info);
+                    trash_file = g_file_get_child(g_file_new_for_uri("trash:///"), name);
+                    g_object_unref(info);
+                    break;
+                }
+                g_object_unref(info);
+            }
+            g_object_unref(en);
+        }
+        if (trash_file) {
+            GFile *dest = g_file_new_for_path(e->src);
+            g_file_move(trash_file, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+            if (err) { g_printerr("Undo trash error: %s\n", err->message); g_error_free(err); }
+            g_object_unref(trash_file);
+            g_object_unref(dest);
+        }
+        break;
+    }
+    case UNDO_RENAME: {
+        GFile *curr = g_file_new_for_path(e->dest); /* renamed-to path */
+        GFile *restored = g_file_set_display_name(curr, g_path_get_basename(e->src), NULL, &err);
+        if (err) { g_printerr("Undo rename error: %s\n", err->message); g_error_free(err); }
+        if (restored) g_object_unref(restored);
+        g_object_unref(curr);
+        break;
+    }
+    case UNDO_MOVE: {
+        GFile *src = g_file_new_for_path(e->dest);
+        GFile *dst = g_file_new_for_path(e->src);
+        g_file_move(src, dst, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+        if (err) { g_printerr("Undo move error: %s\n", err->message); g_error_free(err); }
+        g_object_unref(src); g_object_unref(dst);
+        break;
+    }
+    }
+    /* Push to redo */
+    g_ptr_array_add(self->redo_stack, e);
+    aether_window_reload(self);
+}
+
+static gboolean on_undo_shortcut(GtkWidget *w, GVariant *a, gpointer ud) {
+    (void)w; (void)a;
+    do_undo(AETHER_WINDOW(ud));
+    return TRUE;
+}
+
+/* ══════════════════════════════════════════════
+   ADDITIONAL KEYBOARD SHORTCUTS
+   ══════════════════════════════════════════════ */
+
+static gboolean on_ctrl_h_shortcut(GtkWidget *w, GVariant *a, gpointer ud) {
+    (void)w; (void)a;
+    AetherWindow *self = AETHER_WINDOW(ud);
+    self->show_hidden = !self->show_hidden;
+    if (self->current_path)
+        aether_file_repository_list_directory_async(
+            self->repo, self->current_path, NULL, on_directory_loaded, self);
+    return TRUE;
+}
+
+static gboolean on_ctrl_d_shortcut(GtkWidget *w, GVariant *a, gpointer ud) {
+    (void)w; (void)a;
+    AetherWindow *self = AETHER_WINDOW(ud);
+    if (!self->current_path) return TRUE;
+    save_bookmark(self->current_path);
+    load_bookmarks(self);
+    return TRUE;
+}
+
+/* ══════════════════════════════════════════════
+   COLUMN VIEW — additional columns (Size, Date)
+   ══════════════════════════════════════════════ */
+
+static void setup_size_col_item(GtkListItemFactory *f, GtkListItem *item, gpointer ud) {
+    (void)f; (void)ud;
+    GtkWidget *lbl = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(lbl), 1.0f);
+    gtk_widget_add_css_class(lbl, "dim-label");
+    gtk_widget_set_margin_end(lbl, 8);
+    gtk_list_item_set_child(item, lbl);
+}
+static void bind_size_col_item(GtkListItemFactory *f, GtkListItem *item, gpointer ud) {
+    (void)f; (void)ud;
+    AetherFileEntity *e = AETHER_FILE_ENTITY(gtk_list_item_get_item(item));
+    if (!e) return;
+    GtkWidget *lbl = gtk_list_item_get_child(item);
+    if (aether_file_entity_is_directory(e)) {
+        gtk_label_set_text(GTK_LABEL(lbl), "—");
+    } else {
+        goffset sz = aether_file_entity_get_size(e);
+        char *s;
+        if (sz < 1024)            s = g_strdup_printf("%" G_GOFFSET_FORMAT " B", sz);
+        else if (sz < 1024*1024)  s = g_strdup_printf("%.0f KB", sz/1024.0);
+        else if (sz < 1024*1024*1024LL) s = g_strdup_printf("%.1f MB", sz/(1024.0*1024.0));
+        else                      s = g_strdup_printf("%.2f GB", sz/(1024.0*1024.0*1024.0));
+        gtk_label_set_text(GTK_LABEL(lbl), s);
+        g_free(s);
+    }
+}
+static void unbind_size_col_item(GtkListItemFactory *f, GtkListItem *item, gpointer ud) {
+    (void)f; (void)ud;
+    gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(item)), "");
+}
+
 /* ── GObject lifecycle ── */
 static void aether_window_dispose(GObject *object) {
     AetherWindow *self = AETHER_WINDOW(object);
@@ -1006,6 +1293,13 @@ static void aether_window_dispose(GObject *object) {
     g_free(self->filter_string);
     if (self->back_stack) g_ptr_array_free(self->back_stack, TRUE);
     if (self->fwd_stack)  g_ptr_array_free(self->fwd_stack,  TRUE);
+    if (self->undo_stack) g_ptr_array_free(self->undo_stack, TRUE);
+    if (self->redo_stack) g_ptr_array_free(self->redo_stack, TRUE);
+    if (self->tabs) {
+        for (guint i = 0; i < self->tabs->len; i++)
+            tab_session_free_fields(&g_array_index(self->tabs, AetherTabSession, i));
+        g_array_free(self->tabs, TRUE);
+    }
     aether_clipboard_controller_free(self->clipboard);
     G_OBJECT_CLASS(aether_window_parent_class)->dispose(object);
 }
@@ -1021,9 +1315,16 @@ static void aether_window_init(AetherWindow *self) {
     self->filter_string  = NULL;
     self->show_hidden    = FALSE;
     self->item_count     = 0;
+    self->sort_mode      = 0;
+    self->sort_asc       = TRUE;
     self->back_stack     = g_ptr_array_new_with_free_func(g_free);
     self->fwd_stack      = g_ptr_array_new_with_free_func(g_free);
+    self->undo_stack     = g_ptr_array_new_with_free_func(undo_entry_free);
+    self->redo_stack     = g_ptr_array_new_with_free_func(undo_entry_free);
     self->clipboard      = aether_clipboard_controller_new();
+
+    /* Tabs array */
+    self->tabs = g_array_new(FALSE, TRUE, sizeof(AetherTabSession));
 
     gtk_window_set_title(GTK_WINDOW(self), "AetherFiles");
     gtk_window_set_default_size(GTK_WINDOW(self), 1000, 660);
@@ -1092,6 +1393,17 @@ static void aether_window_init(AetherWindow *self) {
     gtk_column_view_column_set_expand(col, TRUE);
     gtk_column_view_append_column(GTK_COLUMN_VIEW(self->list_view), col);
     g_object_unref(col);
+
+    /* Size column */
+    GtkListItemFactory *sf = gtk_signal_list_item_factory_new();
+    g_signal_connect(sf, "setup",  G_CALLBACK(setup_size_col_item),  NULL);
+    g_signal_connect(sf, "bind",   G_CALLBACK(bind_size_col_item),   NULL);
+    g_signal_connect(sf, "unbind", G_CALLBACK(unbind_size_col_item), NULL);
+    GtkColumnViewColumn *size_col = gtk_column_view_column_new("Size", sf);
+    gtk_column_view_column_set_fixed_width(size_col, 90);
+    gtk_column_view_append_column(GTK_COLUMN_VIEW(self->list_view), size_col);
+    g_object_unref(size_col);
+    g_object_unref(sf);
 
     gtk_stack_add_named(GTK_STACK(self->view_stack), grid_scrolled, "grid");
     gtk_stack_add_named(GTK_STACK(self->view_stack), list_scrolled, "list");
@@ -1211,8 +1523,21 @@ static void aether_window_init(AetherWindow *self) {
     gtk_box_append(GTK_BOX(statusbar), self->status_label);
     gtk_box_append(GTK_BOX(statusbar), self->space_label);
 
+    /* ══ AdwTabView + AdwTabBar ══ */
+    self->tab_view = adw_tab_view_new();
+    gtk_widget_add_css_class(self->tab_view, "aether-tab-view");
+    gtk_widget_set_vexpand(self->tab_view, FALSE);
+    gtk_widget_set_hexpand(self->tab_view, TRUE);
+
+    self->tab_bar = adw_tab_bar_new();
+    adw_tab_bar_set_view(ADW_TAB_BAR(self->tab_bar), ADW_TAB_VIEW(self->tab_view));
+    gtk_widget_add_css_class(self->tab_bar, "aether-tab-bar");
+    g_signal_connect(self->tab_view, "notify::selected-page",
+                     G_CALLBACK(on_tab_selected), self);
+
     /* ══ Content assembly ══ */
     GtkWidget *content_area = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append(GTK_BOX(content_area), self->tab_bar);
     gtk_box_append(GTK_BOX(content_area), self->search_bar);
     gtk_box_append(GTK_BOX(content_area), toolbar);
     gtk_widget_set_vexpand(self->view_stack, TRUE);
@@ -1246,10 +1571,15 @@ static void aether_window_init(AetherWindow *self) {
     gtk_shortcut_controller_set_scope(sc, GTK_SHORTCUT_SCOPE_MANAGED);
 
     struct { guint key; GdkModifierType mod; GCallback cb; } sc_list[] = {
-        { GDK_KEY_Left,  GDK_ALT_MASK,  G_CALLBACK(on_key_back)    },
-        { GDK_KEY_Right, GDK_ALT_MASK,  G_CALLBACK(on_key_fwd)     },
-        { GDK_KEY_Up,    GDK_ALT_MASK,  G_CALLBACK(on_key_up)      },
-        { GDK_KEY_F5,    0,             G_CALLBACK(on_key_refresh)  },
+        { GDK_KEY_Left,  GDK_ALT_MASK,              G_CALLBACK(on_key_back)         },
+        { GDK_KEY_Right, GDK_ALT_MASK,              G_CALLBACK(on_key_fwd)          },
+        { GDK_KEY_Up,    GDK_ALT_MASK,              G_CALLBACK(on_key_up)           },
+        { GDK_KEY_F5,    0,                         G_CALLBACK(on_key_refresh)      },
+        { GDK_KEY_t,     GDK_CONTROL_MASK,          G_CALLBACK(on_new_tab_shortcut) },
+        { GDK_KEY_w,     GDK_CONTROL_MASK,          G_CALLBACK(on_close_tab_shortcut) },
+        { GDK_KEY_z,     GDK_CONTROL_MASK,          G_CALLBACK(on_undo_shortcut)    },
+        { GDK_KEY_h,     GDK_CONTROL_MASK,          G_CALLBACK(on_ctrl_h_shortcut)  },
+        { GDK_KEY_d,     GDK_CONTROL_MASK,          G_CALLBACK(on_ctrl_d_shortcut)  },
         { 0, 0, NULL }
     };
     for (int i = 0; sc_list[i].key; i++) {
@@ -1294,6 +1624,9 @@ static void aether_window_init(AetherWindow *self) {
     g_signal_connect(add_bm_path, "activate", G_CALLBACK(on_add_bookmark_path_action), self);
     g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(add_bm_path));
     g_object_unref(add_bm_path);
+
+    /* ══ Create first tab ══ */
+    new_tab(self, g_get_home_dir());
 
     load_directory(self, g_get_home_dir());
 }
