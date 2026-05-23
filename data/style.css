@@ -1,0 +1,444 @@
+/* ============================================================
+   AetherFiles — Glassmorphism Dark Theme
+   Matching the reference design: blurred dark background,
+   translucent sidebar, light-blue folder icons, macOS-style window
+   ============================================================ */
+
+/* ---------- Window & Root ---------- */
+window.aether-window {
+  background-color: transparent;
+}
+
+/* The root split-view background — deep dark with subtle gradient */
+.aether-root {
+  background: rgba(0, 0, 0, 0.302);
+}
+
+/* ---------- Sidebar ---------- */
+.aether-sidebar {
+  background: rgba(0, 0, 0, 0);
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  min-width: 200px;
+  max-width: 240px;
+}
+
+.aether-sidebar > * {
+  background: transparent;
+}
+
+/* Sidebar header */
+.aether-sidebar headerbar {
+  background: rgba(0, 0, 0, 0);
+  box-shadow: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  min-height: 46px;
+}
+
+.aether-sidebar headerbar .title {
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(220, 235, 255, 0.9);
+  letter-spacing: 0.5px;
+}
+
+/* Sidebar navigation list */
+.aether-sidebar .navigation-sidebar {
+  background: transparent;
+  padding: 6px 0;
+}
+
+.aether-sidebar .navigation-sidebar row {
+  border-radius: 8px;
+  margin: 1px 8px;
+  padding: 0 4px;
+  min-height: 36px;
+  transition: background 150ms ease;
+}
+
+.aether-sidebar .navigation-sidebar row:hover {
+  background: rgba(94, 196, 255, 0.10);
+}
+
+.aether-sidebar .navigation-sidebar row:selected {
+  background: rgba(94, 196, 255, 0.18);
+}
+
+.aether-sidebar .navigation-sidebar row:selected label {
+  color: #5EC4FF;
+  font-weight: 600;
+}
+
+.aether-sidebar .navigation-sidebar row label {
+  color: rgba(200, 220, 255, 0.80);
+  font-size: 13px;
+}
+
+.aether-sidebar .navigation-sidebar row image {
+  color: rgba(180, 205, 255, 0.65);
+  -gtk-icon-size: 16px;
+}
+
+.aether-sidebar .navigation-sidebar row:selected image {
+  color: #5EC4FF;
+}
+
+/* Sidebar section headers */
+.sidebar-section-label {
+  color: rgba(140, 165, 210, 0.55);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  padding: 10px 18px 4px;
+}
+
+/* Sidebar separator */
+.aether-sidebar separator {
+  background: rgba(255, 255, 255, 0.06);
+  margin: 4px 12px;
+  min-height: 1px;
+}
+
+/* ---------- Drives in Sidebar ---------- */
+.drive-row {
+  border-radius: 8px;
+  margin: 1px 8px;
+  min-height: 40px;
+}
+
+.drive-row .drive-label {
+  color: rgba(200, 220, 255, 0.80);
+  font-size: 13px;
+}
+
+.drive-row .drive-sublabel {
+  color: rgba(140, 165, 210, 0.55);
+  font-size: 10px;
+}
+
+/* ---------- Main Content Header ---------- */
+.aether-content headerbar {
+  background: rgba(10, 14, 30, 0.55);
+  box-shadow: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  min-height: 46px;
+}
+
+/* ---------- Path Bar ---------- */
+.aether-pathbar {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  padding: 0 4px;
+  min-height: 32px;
+}
+
+.aether-pathbar button {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: rgba(200, 220, 255, 0.80);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 6px;
+  min-height: 28px;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.aether-pathbar button:hover {
+  background: rgba(94, 196, 255, 0.15);
+  color: #5EC4FF;
+}
+
+.aether-pathbar button:last-child {
+  color: rgba(220, 235, 255, 0.95);
+  font-weight: 600;
+}
+
+.aether-pathbar .path-sep {
+  color: rgba(140, 165, 210, 0.45);
+  font-size: 12px;
+  margin: 0 2px;
+}
+
+/* ---------- Action Toolbar (below header) ---------- */
+.aether-toolbar {
+  background: rgba(10, 14, 32, 0.50);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 6px 14px;
+  min-height: 44px;
+}
+
+.aether-toolbar button {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+  color: rgba(200, 220, 255, 0.85);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 14px;
+  margin: 0 2px;
+  min-height: 30px;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.aether-toolbar button:hover {
+  background: rgba(94, 196, 255, 0.15);
+  border-color: rgba(94, 196, 255, 0.35);
+  color: #5EC4FF;
+}
+
+.aether-toolbar button:active {
+  background: rgba(94, 196, 255, 0.22);
+}
+
+.aether-toolbar button image {
+  -gtk-icon-size: 14px;
+  color: inherit;
+}
+
+/* ---------- File Grid ---------- */
+.aether-grid {
+  background: transparent;
+}
+
+gridview {
+  background: transparent;
+  padding: 12px;
+}
+
+gridview > child {
+  border-radius: 10px;
+  transition: background 130ms ease;
+}
+
+gridview > child:hover {
+  background: rgba(94, 196, 255, 0.10);
+}
+
+gridview > child:selected {
+  background: rgba(94, 196, 255, 0.20);
+}
+
+/* File cell inside grid */
+.nautilus-grid-cell {
+  border-radius: 8px;
+  padding: 6px 4px;
+}
+
+.nautilus-grid-cell image {
+  /* Tint folder icons to the light-blue color from the design */
+  color: #7DD3F8;
+  -gtk-icon-size: 64px;
+  filter: drop-shadow(0 2px 8px rgba(94, 196, 255, 0.25));
+}
+
+.nautilus-grid-cell label {
+  color: rgba(210, 230, 255, 0.90);
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+/* ---------- File List (Column View) ---------- */
+columnview {
+  background: transparent;
+}
+
+columnview > child {
+  border-radius: 6px;
+  transition: background 120ms ease;
+}
+
+columnview > child:hover {
+  background: rgba(94, 196, 255, 0.08);
+}
+
+columnview > child:selected {
+  background: rgba(94, 196, 255, 0.18);
+}
+
+columnview header {
+  background: rgba(10, 14, 30, 0.55);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+columnview header button {
+  background: transparent;
+  border: none;
+  color: rgba(160, 185, 225, 0.70);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+/* ---------- Scrollbars ---------- */
+scrollbar {
+  background: transparent;
+}
+
+scrollbar trough {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+}
+
+scrollbar slider {
+  background: rgba(94, 196, 255, 0.25);
+  border-radius: 4px;
+  min-width: 6px;
+  min-height: 6px;
+  transition: background 150ms ease;
+}
+
+scrollbar slider:hover {
+  background: rgba(94, 196, 255, 0.45);
+}
+
+/* ---------- Status Bar ---------- */
+.aether-statusbar {
+  background: rgba(8, 12, 28, 0.72);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  min-height: 26px;
+  padding: 0 16px;
+}
+
+.aether-statusbar label {
+  color: rgba(140, 165, 210, 0.65);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* ---------- Search Bar ---------- */
+searchbar {
+  background: rgba(10, 14, 30, 0.60);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+searchentry {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: rgba(220, 235, 255, 0.90);
+  padding: 6px 12px;
+  min-width: 340px;
+}
+
+searchentry:focus {
+  border-color: rgba(94, 196, 255, 0.50);
+  box-shadow: 0 0 0 3px rgba(94, 196, 255, 0.12);
+}
+
+searchentry placeholder {
+  color: rgba(140, 165, 210, 0.45);
+}
+
+/* ---------- Dialogs ---------- */
+dialog {
+  background: rgba(14, 18, 38, 0.95);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+dialog headerbar {
+  background: rgba(10, 14, 30, 0.80);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px 16px 0 0;
+}
+
+/* ---------- Buttons (general) ---------- */
+button.suggested-action {
+  background: rgba(94, 196, 255, 0.85);
+  color: rgba(5, 10, 25, 1.0);
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+button.suggested-action:hover {
+  background: rgba(94, 196, 255, 1.0);
+}
+
+button.destructive-action {
+  background: rgba(255, 80, 80, 0.80);
+  color: white;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+button.flat {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: rgba(180, 205, 255, 0.70);
+  border-radius: 8px;
+  transition: background 130ms ease, color 130ms ease;
+}
+
+button.flat:hover {
+  background: rgba(94, 196, 255, 0.12);
+  color: #5EC4FF;
+}
+
+/* ---------- Nav Buttons (Back/Forward) ---------- */
+.nav-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  color: rgba(180, 205, 255, 0.75);
+  min-width: 32px;
+  min-height: 32px;
+  padding: 4px;
+  transition: background 130ms ease;
+}
+
+.nav-btn:hover {
+  background: rgba(94, 196, 255, 0.15);
+  color: #5EC4FF;
+}
+
+.nav-btn:disabled {
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(140, 165, 210, 0.30);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+/* ---------- View Switcher (Grid/List toggle) ---------- */
+.view-switcher-btn {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: rgba(180, 205, 255, 0.70);
+  border-radius: 8px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 4px;
+  transition: all 130ms ease;
+}
+
+.view-switcher-btn:hover {
+  background: rgba(94, 196, 255, 0.15);
+  color: #5EC4FF;
+}
+
+.view-switcher-btn.active-view {
+  background: rgba(94, 196, 255, 0.22);
+  color: #5EC4FF;
+  border-color: rgba(94, 196, 255, 0.40);
+}
+
+/* ---------- Rename inline entry ---------- */
+.rename-entry {
+  background: rgba(94, 196, 255, 0.10);
+  border: 1px solid rgba(94, 196, 255, 0.45);
+  border-radius: 6px;
+  color: rgba(220, 235, 255, 0.95);
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+/* ---------- Toast Notifications ---------- */
+toast {
+  background: rgba(20, 26, 50, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 12px;
+  color: rgba(210, 230, 255, 0.90);
+}
