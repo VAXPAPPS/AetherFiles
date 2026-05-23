@@ -44,6 +44,17 @@ struct _AetherWindow {
     GtkFilterListModel *filter_model;
     GtkCustomFilter    *name_filter;
     char               *filter_string;
+
+    /* Sorting */
+    int     sort_mode;      /* 0=Name, 1=Size, 2=Date, 3=Type */
+    gboolean sort_asc;
+    GtkWidget *sort_btn;
+
+    /* File monitor */
+    GFileMonitor *dir_monitor;
+
+    /* Bookmarks sidebar rows start index */
+    int bookmark_row_start;
 };
 
 G_DEFINE_TYPE(AetherWindow, aether_window, ADW_TYPE_APPLICATION_WINDOW)
@@ -51,6 +62,13 @@ G_DEFINE_TYPE(AetherWindow, aether_window, ADW_TYPE_APPLICATION_WINDOW)
 static void load_directory(AetherWindow *self, const char *path);
 static void update_nav_buttons(AetherWindow *self);
 static void update_statusbar(AetherWindow *self);
+static void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data);
+static void setup_file_monitor(AetherWindow *self, const char *path);
+static void load_bookmarks(AetherWindow *self);
+static void save_bookmark(const char *path);
+static GtkWidget *make_sidebar_row(const char *name, const char *icon_name);
+static void add_sidebar_separator(AetherWindow *self);
+static void add_sidebar_header(AetherWindow *self, const char *title);
 
 /* ── CSS loading ── */
 static void load_css(void) {
@@ -120,8 +138,13 @@ static void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     g_menu_append_item(s3, mi); g_object_unref(mi);
     g_menu_append_section(menu, NULL, G_MENU_MODEL(s3)); g_object_unref(s3);
 
-    /* Properties */
+    /* Properties + Bookmarks */
     GMenu *s4 = g_menu_new();
+    if (aether_file_entity_is_directory(entity)) {
+        mi = g_menu_item_new("Add to Bookmarks", NULL);
+        g_menu_item_set_action_and_target_value(mi, "win.add-bookmark-path", pv);
+        g_menu_append_item(s4, mi); g_object_unref(mi);
+    }
     mi = g_menu_item_new("Properties", NULL);
     g_menu_item_set_action_and_target_value(mi, "app.properties", pv);
     g_menu_append_item(s4, mi); g_object_unref(mi);
@@ -265,16 +288,49 @@ static gboolean name_filter_func(gpointer item, gpointer user_data) {
 
 /* ── Sorting ── */
 static gint compare_entities(gconstpointer a, gconstpointer b, gpointer user_data) {
-    AetherFileEntity *f1 = AETHER_FILE_ENTITY(a);
-    AetherFileEntity *f2 = AETHER_FILE_ENTITY(b);
+    AetherWindow     *self = AETHER_WINDOW(user_data);
+    AetherFileEntity *f1   = AETHER_FILE_ENTITY(a);
+    AetherFileEntity *f2   = AETHER_FILE_ENTITY(b);
+
+    /* Dirs always first */
     gboolean d1 = aether_file_entity_is_directory(f1);
     gboolean d2 = aether_file_entity_is_directory(f2);
     if (d1 && !d2) return GTK_ORDERING_SMALLER;
     if (!d1 && d2) return GTK_ORDERING_LARGER;
-    char *k1 = g_utf8_casefold(aether_file_entity_get_name(f1) ?: "", -1);
-    char *k2 = g_utf8_casefold(aether_file_entity_get_name(f2) ?: "", -1);
-    int cmp = g_utf8_collate(k1, k2);
-    g_free(k1); g_free(k2);
+
+    int cmp = 0;
+    switch (self ? self->sort_mode : 0) {
+    case 1: /* Size */
+        {
+            goffset s1 = aether_file_entity_get_size(f1);
+            goffset s2 = aether_file_entity_get_size(f2);
+            cmp = (s1 < s2) ? -1 : (s1 > s2) ? 1 : 0;
+        }
+        break;
+    case 2: /* Type / extension */
+        {
+            const char *n1 = aether_file_entity_get_name(f1) ?: "";
+            const char *n2 = aether_file_entity_get_name(f2) ?: "";
+            const char *e1 = strrchr(n1, '.');
+            const char *e2 = strrchr(n2, '.');
+            char *t1 = g_utf8_casefold(e1 ? e1 : "", -1);
+            char *t2 = g_utf8_casefold(e2 ? e2 : "", -1);
+            cmp = g_utf8_collate(t1, t2);
+            g_free(t1); g_free(t2);
+        }
+        break;
+    case 0: /* Name (default) */
+    default:
+        {
+            char *k1 = g_utf8_casefold(aether_file_entity_get_name(f1) ?: "", -1);
+            char *k2 = g_utf8_casefold(aether_file_entity_get_name(f2) ?: "", -1);
+            cmp = g_utf8_collate(k1, k2);
+            g_free(k1); g_free(k2);
+        }
+        break;
+    }
+
+    if (self && !self->sort_asc) cmp = -cmp;
     if (cmp < 0) return GTK_ORDERING_SMALLER;
     if (cmp > 0) return GTK_ORDERING_LARGER;
     return GTK_ORDERING_EQUAL;
@@ -333,10 +389,11 @@ static void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer use
     }
     g_object_unref(raw);
 
-    GtkCustomSorter    *sorter     = gtk_custom_sorter_new(compare_entities, NULL, NULL);
-    GtkSortListModel   *sorted     = gtk_sort_list_model_new(G_LIST_MODEL(visible), GTK_SORTER(sorter));
-    GtkCustomFilter    *filter     = gtk_custom_filter_new(name_filter_func, self, NULL);
-    GtkFilterListModel *filtered   = gtk_filter_list_model_new(G_LIST_MODEL(sorted), GTK_FILTER(filter));
+    /* Sort with self context so sort_mode/sort_asc are used */
+    GtkCustomSorter    *sorter   = gtk_custom_sorter_new(compare_entities, self, NULL);
+    GtkSortListModel   *sorted   = gtk_sort_list_model_new(G_LIST_MODEL(visible), GTK_SORTER(sorter));
+    GtkCustomFilter    *filter   = gtk_custom_filter_new(name_filter_func, self, NULL);
+    GtkFilterListModel *filtered = gtk_filter_list_model_new(G_LIST_MODEL(sorted), GTK_FILTER(filter));
 
     self->filter_model = filtered;
     self->name_filter  = filter;
@@ -350,6 +407,9 @@ static void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer use
     g_object_unref(list_sel);
 
     update_statusbar(self);
+
+    /* Start file monitor for current directory */
+    setup_file_monitor(self, self->current_path);
 }
 
 /* ── Path button ── */
@@ -751,10 +811,197 @@ static gboolean on_key_refresh(GtkWidget *w, GVariant *args, gpointer ud) {
     return TRUE;
 }
 
+/* ── File Monitor ── */
+static void on_dir_changed(GFileMonitor *mon, GFile *file, GFile *other,
+                           GFileMonitorEvent event, gpointer user_data)
+{
+    (void)mon; (void)file; (void)other;
+    AetherWindow *self = AETHER_WINDOW(user_data);
+    /* Debounce: only react to meaningful events */
+    switch (event) {
+    case G_FILE_MONITOR_EVENT_CREATED:
+    case G_FILE_MONITOR_EVENT_DELETED:
+    case G_FILE_MONITOR_EVENT_RENAMED:
+    case G_FILE_MONITOR_EVENT_MOVED_IN:
+    case G_FILE_MONITOR_EVENT_MOVED_OUT:
+        if (self->current_path)
+            aether_file_repository_list_directory_async(
+                self->repo, self->current_path, NULL, on_directory_loaded, self);
+        break;
+    default:
+        break;
+    }
+}
+
+static void setup_file_monitor(AetherWindow *self, const char *path) {
+    if (self->dir_monitor) {
+        g_file_monitor_cancel(self->dir_monitor);
+        g_clear_object(&self->dir_monitor);
+    }
+    if (!path) return;
+    GFile *dir = g_file_new_for_path(path);
+    GError *err = NULL;
+    self->dir_monitor = g_file_monitor_directory(dir,
+                            G_FILE_MONITOR_WATCH_MOVES, NULL, &err);
+    g_object_unref(dir);
+    if (err) { g_error_free(err); return; }
+    g_signal_connect(self->dir_monitor, "changed",
+                     G_CALLBACK(on_dir_changed), self);
+}
+
+/* ── Dynamic Sort handler ── */
+static void on_sort_mode_changed(GtkDropDown *dropdown, GParamSpec *pspec,
+                                  gpointer user_data)
+{
+    (void)pspec;
+    AetherWindow *self = AETHER_WINDOW(user_data);
+    self->sort_mode = (int)gtk_drop_down_get_selected(dropdown);
+    if (self->current_path)
+        aether_file_repository_list_directory_async(
+            self->repo, self->current_path, NULL, on_directory_loaded, self);
+}
+
+static void on_sort_dir_clicked(GtkButton *btn, gpointer user_data) {
+    (void)btn;
+    AetherWindow *self = AETHER_WINDOW(user_data);
+    self->sort_asc = !self->sort_asc;
+    gtk_button_set_icon_name(GTK_BUTTON(self->sort_btn),
+        self->sort_asc ? "view-sort-ascending-symbolic"
+                       : "view-sort-descending-symbolic");
+    if (self->current_path)
+        aether_file_repository_list_directory_async(
+            self->repo, self->current_path, NULL, on_directory_loaded, self);
+}
+
+/* ── Drag & Drop ── */
+static void on_drag_prepare(GtkDragSource *source, double x, double y,
+                             gpointer user_data)
+{
+    /* We store a content provider with the file URI when drag starts */
+    (void)source; (void)x; (void)y; (void)user_data;
+}
+
+static void on_add_bookmark_action(GSimpleAction *a, GVariant *p, gpointer ud) {
+    (void)a; (void)p;
+    AetherWindow *w = AETHER_WINDOW(ud);
+    if (!w->current_path) return;
+    save_bookmark(w->current_path);
+    load_bookmarks(w);
+}
+
+static void on_add_bookmark_path_action(GSimpleAction *a, GVariant *p, gpointer ud) {
+    (void)a;
+    AetherWindow *w = AETHER_WINDOW(ud);
+    const char *path = g_variant_get_string(p, NULL);
+    if (!path) return;
+    save_bookmark(path);
+    load_bookmarks(w);
+}
+
+static gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
+                               double x, double y, gpointer ud)
+{
+    (void)t; (void)x; (void)y;
+    AetherWindow *w = AETHER_WINDOW(ud);
+    if (!G_VALUE_HOLDS(val, G_TYPE_FILE)) return FALSE;
+    GFile *src_file = G_FILE(g_value_get_object(val));
+    if (!src_file || !w->current_path) return FALSE;
+    char *src_path  = g_file_get_path(src_file);
+    char *basename  = g_path_get_basename(src_path);
+    char *dest_path = g_build_filename(w->current_path, basename, NULL);
+    GFile *dest = g_file_new_for_path(dest_path);
+    GError *err = NULL;
+    g_file_move(src_file, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+    if (err) { g_printerr("DnD error: %s\n", err->message); g_error_free(err); }
+    else { aether_file_repository_list_directory_async(
+               w->repo, w->current_path, NULL, on_directory_loaded, w); }
+    g_free(src_path); g_free(basename); g_free(dest_path);
+    g_object_unref(dest);
+    return TRUE;
+}
+
+static void setup_drag_drop(AetherWindow *self, GtkWidget *view) {
+    GtkDropTarget *target = gtk_drop_target_new(G_TYPE_FILE,
+                                GDK_ACTION_MOVE | GDK_ACTION_COPY);
+    g_signal_connect(target, "drop", G_CALLBACK(on_drop_target), self);
+    gtk_widget_add_controller(view, GTK_EVENT_CONTROLLER(target));
+}
+
+/* ── Bookmarks ── */
+#define BOOKMARKS_FILE ".config/gtk-3.0/bookmarks"
+
+static void load_bookmarks(AetherWindow *self) {
+    char *bm_path = g_build_filename(g_get_home_dir(), BOOKMARKS_FILE, NULL);
+    gchar *contents = NULL;
+    if (!g_file_get_contents(bm_path, &contents, NULL, NULL)) {
+        g_free(bm_path);
+        return;
+    }
+    g_free(bm_path);
+
+    /* Remove old bookmark rows */
+    GtkListBoxRow *row;
+    int count = 0;
+    while ((row = gtk_list_box_get_row_at_index(
+                GTK_LIST_BOX(self->sidebar_list),
+                self->bookmark_row_start + count)) != NULL) {
+        gtk_list_box_remove(GTK_LIST_BOX(self->sidebar_list), GTK_WIDGET(row));
+    }
+
+    char **lines = g_strsplit(contents, "\n", -1);
+    g_free(contents);
+
+    for (int i = 0; lines[i] != NULL; i++) {
+        const char *line = lines[i];
+        if (!line || line[0] == '\0') continue;
+        /* Each line: file:///path [label] */
+        char **parts = g_strsplit(line, " ", 2);
+        const char *uri = parts[0];
+        GFile *f = g_file_new_for_uri(uri);
+        char  *path = g_file_get_path(f);
+        g_object_unref(f);
+
+        if (!path) { g_strfreev(parts); continue; }
+
+        const char *label = (parts[1] && parts[1][0]) ?
+                             parts[1] : g_path_get_basename(path);
+
+        GtkWidget *bm_row = make_sidebar_row(label, "bookmark-new-symbolic");
+        g_object_set_data_full(G_OBJECT(bm_row), "path", g_strdup(path), g_free);
+        gtk_list_box_append(GTK_LIST_BOX(self->sidebar_list), bm_row);
+
+        g_free(path);
+        g_strfreev(parts);
+    }
+    g_strfreev(lines);
+}
+
+static void save_bookmark(const char *path) {
+    char *bm_path = g_build_filename(g_get_home_dir(), BOOKMARKS_FILE, NULL);
+    gchar *existing = NULL;
+    g_file_get_contents(bm_path, &existing, NULL, NULL);
+
+    char *uri     = g_filename_to_uri(path, NULL, NULL);
+    char *new_line = g_strdup_printf("%s\n", uri);
+    char *new_contents;
+    if (existing)
+        new_contents = g_strconcat(existing, new_line, NULL);
+    else
+        new_contents = g_strdup(new_line);
+
+    g_file_set_contents(bm_path, new_contents, -1, NULL);
+    g_free(existing); g_free(uri); g_free(new_line);
+    g_free(new_contents); g_free(bm_path);
+}
+
 /* ── GObject lifecycle ── */
 static void aether_window_dispose(GObject *object) {
     AetherWindow *self = AETHER_WINDOW(object);
     g_clear_object(&self->repo);
+    if (self->dir_monitor) {
+        g_file_monitor_cancel(self->dir_monitor);
+        g_clear_object(&self->dir_monitor);
+    }
     g_free(self->current_path);
     g_free(self->filter_string);
     if (self->back_stack) g_ptr_array_free(self->back_stack, TRUE);
@@ -914,11 +1161,11 @@ static void aether_window_init(AetherWindow *self) {
     gtk_widget_add_css_class(toolbar, "aether-toolbar");
 
     struct { const char *icon; const char *label; GCallback cb; } tb_btns[] = {
-        { "folder-new-symbolic",    "New Folder",    G_CALLBACK(on_new_folder_clicked) },
-        { "document-new-symbolic",  "New Document",  G_CALLBACK(on_new_document_clicked) },
+        { "folder-new-symbolic",         "New Folder",    G_CALLBACK(on_new_folder_clicked)    },
+        { "document-new-symbolic",       "New Document",  G_CALLBACK(on_new_document_clicked)  },
         { "utilities-terminal-symbolic", "Open Terminal", G_CALLBACK(on_open_terminal_clicked) },
-        { "edit-paste-symbolic",    "Paste",         G_CALLBACK(on_paste_toolbar_clicked) },
-        { "edit-select-all-symbolic","Select All",   G_CALLBACK(on_select_all_clicked) },
+        { "edit-paste-symbolic",         "Paste",         G_CALLBACK(on_paste_toolbar_clicked) },
+        { "edit-select-all-symbolic",    "Select All",    G_CALLBACK(on_select_all_clicked)    },
     };
 
     for (int i = 0; i < 5; i++) {
@@ -932,6 +1179,26 @@ static void aether_window_init(AetherWindow *self) {
         g_signal_connect(b, "clicked", tb_btns[i].cb, self);
         gtk_box_append(GTK_BOX(toolbar), b);
     }
+
+    /* Sort controls on the right side of toolbar */
+    GtkWidget *sort_spacer = gtk_label_new("");
+    gtk_widget_set_hexpand(sort_spacer, TRUE);
+    gtk_box_append(GTK_BOX(toolbar), sort_spacer);
+
+    const char *sort_options[] = { "Name", "Size", "Type", NULL };
+    GtkStringList *sort_list = gtk_string_list_new(sort_options);
+    GtkWidget *sort_dropdown = gtk_drop_down_new(G_LIST_MODEL(sort_list), NULL);
+    gtk_widget_add_css_class(sort_dropdown, "sort-dropdown");
+    gtk_widget_set_tooltip_text(sort_dropdown, "Sort by");
+    g_signal_connect(sort_dropdown, "notify::selected",
+                     G_CALLBACK(on_sort_mode_changed), self);
+    gtk_box_append(GTK_BOX(toolbar), sort_dropdown);
+
+    self->sort_btn = gtk_button_new_from_icon_name("view-sort-ascending-symbolic");
+    gtk_widget_add_css_class(self->sort_btn, "flat");
+    gtk_widget_set_tooltip_text(self->sort_btn, "Toggle sort direction");
+    g_signal_connect(self->sort_btn, "clicked", G_CALLBACK(on_sort_dir_clicked), self);
+    gtk_box_append(GTK_BOX(toolbar), self->sort_btn);
 
     /* ══ Status bar ══ */
     GtkWidget *statusbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -998,6 +1265,35 @@ static void aether_window_init(AetherWindow *self) {
     g_signal_connect(toggle_hidden, "activate", G_CALLBACK(on_toggle_hidden), self);
     g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(toggle_hidden));
     g_object_unref(toggle_hidden);
+
+    /* ══ Drag & Drop ══ */
+    setup_drag_drop(self, self->grid_view);
+    setup_drag_drop(self, self->list_view);
+
+    /* ══ Bookmarks ══ */
+    self->bookmark_row_start = -1; /* will be set in load_bookmarks */
+    {
+        /* Count existing sidebar rows to know offset for bookmarks */
+        int n = 0;
+        while (gtk_list_box_get_row_at_index(GTK_LIST_BOX(self->sidebar_list), n) != NULL)
+            n++;
+        self->bookmark_row_start = n;
+    }
+    add_sidebar_separator(self);
+    add_sidebar_header(self, "BOOKMARKS");
+    self->bookmark_row_start += 2; /* account for sep + header */
+    load_bookmarks(self);
+
+    /* ══ Add bookmark action ══ */
+    GSimpleAction *add_bm = g_simple_action_new("add-bookmark", NULL);
+    g_signal_connect(add_bm, "activate", G_CALLBACK(on_add_bookmark_action), self);
+    g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(add_bm));
+    g_object_unref(add_bm);
+
+    GSimpleAction *add_bm_path = g_simple_action_new("add-bookmark-path", G_VARIANT_TYPE_STRING);
+    g_signal_connect(add_bm_path, "activate", G_CALLBACK(on_add_bookmark_path_action), self);
+    g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(add_bm_path));
+    g_object_unref(add_bm_path);
 
     load_directory(self, g_get_home_dir());
 }

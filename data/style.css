@@ -441,3 +441,26 @@ toast {
   border-radius: 12px;
   color: rgba(210, 230, 255, 0.90);
 }
+
+/* ---------- Sort Dropdown ---------- */
+.sort-dropdown {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+  color: rgba(200, 220, 255, 0.85);
+  font-size: 12px;
+  min-height: 28px;
+  padding: 0 6px;
+}
+
+.sort-dropdown:hover {
+  background: rgba(94, 196, 255, 0.12);
+  border-color: rgba(94, 196, 255, 0.30);
+}
+
+/* ---------- Drop zones ---------- */
+gridview.drag-over, columnview.drag-over {
+  background: rgba(94, 196, 255, 0.08);
+  border: 2px dashed rgba(94, 196, 255, 0.40);
+  border-radius: 8px;
+}
