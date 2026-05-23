@@ -11,15 +11,14 @@ window.aether-window {
 
 /* The root split-view background — deep dark with subtle gradient */
 .aether-root {
-  background: rgba(0, 0, 0, 0.302);
+  background: rgba(0, 0, 0, 0.300);
 }
 
 /* ---------- Sidebar ---------- */
 .aether-sidebar {
   background: rgba(0, 0, 0, 0);
-  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  border-right: 1px solid rgba(0, 0, 0, 0);
   min-width: 200px;
-  max-width: 240px;
 }
 
 .aether-sidebar > * {
