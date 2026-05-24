@@ -149,20 +149,20 @@ static void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     /* Clipboard */
     GMenu *s2 = g_menu_new();
     mi = g_menu_item_new("Cut",  NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.cut",  pv);
+    g_menu_item_set_action_and_target_value(mi, "app.cut",  NULL);
     g_menu_append_item(s2, mi); g_object_unref(mi);
     mi = g_menu_item_new("Copy", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.copy", pv);
+    g_menu_item_set_action_and_target_value(mi, "app.copy", NULL);
     g_menu_append_item(s2, mi); g_object_unref(mi);
     mi = g_menu_item_new("Paste", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.paste", pv);
+    g_menu_item_set_action_and_target_value(mi, "app.paste", NULL);
     g_menu_append_item(s2, mi); g_object_unref(mi);
     g_menu_append_section(menu, NULL, G_MENU_MODEL(s2)); g_object_unref(s2);
 
     /* Manage */
     GMenu *s3 = g_menu_new();
     mi = g_menu_item_new("Rename…", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.rename", pv);
+    g_menu_item_set_action_and_target_value(mi, "app.rename", NULL);
     g_menu_append_item(s3, mi); g_object_unref(mi);
 
     if (!aether_file_entity_is_directory(entity)) {
@@ -172,7 +172,7 @@ static void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     }
 
     mi = g_menu_item_new("Move to Trash", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.trash", pv);
+    g_menu_item_set_action_and_target_value(mi, "app.trash", NULL);
     g_menu_append_item(s3, mi); g_object_unref(mi);
     g_menu_append_section(menu, NULL, G_MENU_MODEL(s3)); g_object_unref(s3);
 
@@ -1644,4 +1644,46 @@ void aether_window_reload(AetherWindow *self) {
     if (!self->current_path) return;
     aether_file_repository_list_directory_async(
         self->repo, self->current_path, NULL, on_directory_loaded, self);
+}
+
+GStrv aether_window_get_selected_paths(AetherWindow *self) {
+    GtkSelectionModel *sel = NULL;
+    const char *visible = gtk_stack_get_visible_child_name(GTK_STACK(self->view_stack));
+    if (g_strcmp0(visible, "grid") == 0) {
+        sel = gtk_grid_view_get_model(GTK_GRID_VIEW(self->grid_view));
+    } else if (g_strcmp0(visible, "list") == 0) {
+        sel = gtk_column_view_get_model(GTK_COLUMN_VIEW(self->list_view));
+    }
+    if (!sel) return NULL;
+
+    GtkBitset *bitset = gtk_selection_model_get_selection(sel);
+    if (!bitset || gtk_bitset_is_empty(bitset)) {
+        if (bitset) g_object_unref(bitset);
+        return NULL;
+    }
+
+    GPtrArray *paths = g_ptr_array_new_with_free_func(g_free);
+    GtkBitsetIter iter;
+    guint val;
+    if (gtk_bitset_iter_init_first(&iter, bitset, &val)) {
+        do {
+            gpointer item = g_list_model_get_item(G_LIST_MODEL(sel), val);
+            if (item) {
+                if (AETHER_IS_FILE_ENTITY(item)) {
+                    const char *path = aether_file_entity_get_path(AETHER_FILE_ENTITY(item));
+                    if (path) g_ptr_array_add(paths, g_strdup(path));
+                }
+                g_object_unref(item);
+            }
+        } while (gtk_bitset_iter_next(&iter, &val));
+    }
+    g_object_unref(bitset);
+
+    if (paths->len == 0) {
+        g_ptr_array_unref(paths);
+        return NULL;
+    }
+
+    g_ptr_array_add(paths, NULL);
+    return (GStrv) g_ptr_array_free(paths, FALSE);
 }

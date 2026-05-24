@@ -40,17 +40,27 @@ static void on_open_action(GSimpleAction *action, GVariant *parameter, gpointer 
 
 /* ── cut / copy ── */
 static void on_cut_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
-    (void)action;
+    (void)action; (void)parameter;
     AetherApplication *app = AETHER_APPLICATION(user_data);
-    const char *path = g_variant_get_string(parameter, NULL);
-    aether_clipboard_set(app->clipboard, path, AETHER_CLIPBOARD_CUT);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+    GStrv paths = aether_window_get_selected_paths(win);
+    if (paths) {
+        aether_clipboard_set(app->clipboard, paths, AETHER_CLIPBOARD_CUT);
+        g_strfreev(paths);
+    }
 }
 
 static void on_copy_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
-    (void)action;
+    (void)action; (void)parameter;
     AetherApplication *app = AETHER_APPLICATION(user_data);
-    const char *path = g_variant_get_string(parameter, NULL);
-    aether_clipboard_set(app->clipboard, path, AETHER_CLIPBOARD_COPY);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+    GStrv paths = aether_window_get_selected_paths(win);
+    if (paths) {
+        aether_clipboard_set(app->clipboard, paths, AETHER_CLIPBOARD_COPY);
+        g_strfreev(paths);
+    }
 }
 
 /* ── paste ── */
@@ -94,11 +104,17 @@ static void on_rename_response(AdwAlertDialog *d, const char *resp, gpointer ud)
 }
 
 static void on_rename_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
-    (void)action;
+    (void)action; (void)parameter;
     AetherApplication *app = AETHER_APPLICATION(user_data);
     AetherWindow *win = get_active_win(G_APPLICATION(app));
     if (!win) return;
-    const char *path = g_variant_get_string(parameter, NULL);
+    
+    GStrv paths = aether_window_get_selected_paths(win);
+    if (!paths || !paths[0]) {
+        if (paths) g_strfreev(paths);
+        return;
+    }
+    const char *path = paths[0];
 
     AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Rename", NULL));
     GtkWidget *entry = gtk_entry_new();
@@ -120,20 +136,28 @@ static void on_rename_action(GSimpleAction *action, GVariant *parameter, gpointe
     g_object_set_data(G_OBJECT(dialog), "app-ref", app);
     g_signal_connect(dialog, "response", G_CALLBACK(on_rename_response), NULL);
     adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(win));
+    
+    g_strfreev(paths);
 }
 
 /* ── trash ── */
 static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
-    (void)action;
+    (void)action; (void)parameter;
     AetherApplication *app = AETHER_APPLICATION(user_data);
-    const char *path = g_variant_get_string(parameter, NULL);
-    GFile  *file = g_file_new_for_path(path);
-    GError *err  = NULL;
-    g_file_trash(file, NULL, &err);
-    if (err) { g_printerr("Trash error: %s\n", err->message); g_error_free(err); }
-    g_object_unref(file);
-    AetherWindow *w = get_active_win(G_APPLICATION(app));
-    if (w) aether_window_reload(w);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+    GStrv paths = aether_window_get_selected_paths(win);
+    if (!paths) return;
+    
+    for (int i = 0; paths[i]; i++) {
+        GFile  *file = g_file_new_for_path(paths[i]);
+        GError *err  = NULL;
+        g_file_trash(file, NULL, &err);
+        if (err) { g_printerr("Trash error: %s\n", err->message); g_error_free(err); }
+        g_object_unref(file);
+    }
+    g_strfreev(paths);
+    aether_window_reload(win);
 }
 
 /* ── properties ── */
@@ -235,24 +259,39 @@ static void aether_application_class_init(AetherApplicationClass *klass) {
 static void aether_application_init(AetherApplication *app) {
     app->clipboard = aether_clipboard_controller_new();
 
-    struct { const char *name; GCallback cb; } actions[] = {
-        { "open",           G_CALLBACK(on_open_action)           },
-        { "cut",            G_CALLBACK(on_cut_action)            },
-        { "copy",           G_CALLBACK(on_copy_action)           },
-        { "paste",          G_CALLBACK(on_paste_action)          },
-        { "rename",         G_CALLBACK(on_rename_action)         },
-        { "trash",          G_CALLBACK(on_trash_action)          },
-        { "properties",     G_CALLBACK(on_properties_action)     },
-        { "set_background", G_CALLBACK(on_set_background_action) },
-        { NULL, NULL }
+    struct { const char *name; GCallback cb; const GVariantType *type; } actions[] = {
+        { "open",           G_CALLBACK(on_open_action),           G_VARIANT_TYPE_STRING },
+        { "cut",            G_CALLBACK(on_cut_action),            NULL },
+        { "copy",           G_CALLBACK(on_copy_action),           NULL },
+        { "paste",          G_CALLBACK(on_paste_action),          NULL },
+        { "rename",         G_CALLBACK(on_rename_action),         NULL },
+        { "trash",          G_CALLBACK(on_trash_action),          NULL },
+        { "properties",     G_CALLBACK(on_properties_action),     G_VARIANT_TYPE_STRING },
+        { "set_background", G_CALLBACK(on_set_background_action), G_VARIANT_TYPE_STRING },
+        { NULL, NULL, NULL }
     };
 
     for (int i = 0; actions[i].name; i++) {
-        GSimpleAction *a = g_simple_action_new(actions[i].name, G_VARIANT_TYPE_STRING);
+        GSimpleAction *a = g_simple_action_new(actions[i].name, actions[i].type);
         g_signal_connect(a, "activate", actions[i].cb, app);
         g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(a));
         g_object_unref(a);
     }
+
+    const char *accels_cut[] = { "<Ctrl>x", NULL };
+    gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.cut", accels_cut);
+
+    const char *accels_copy[] = { "<Ctrl>c", NULL };
+    gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.copy", accels_copy);
+
+    const char *accels_paste[] = { "<Ctrl>v", NULL };
+    gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.paste", accels_paste);
+
+    const char *accels_rename[] = { "F2", NULL };
+    gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.rename", accels_rename);
+    
+    const char *accels_trash[] = { "Delete", NULL };
+    gtk_application_set_accels_for_action(GTK_APPLICATION(app), "app.trash", accels_trash);
 }
 
 AetherApplication *aether_application_new(void) {
