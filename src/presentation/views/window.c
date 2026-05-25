@@ -55,7 +55,11 @@ static void aether_window_class_init(AetherWindowClass *klass) {
 static void on_hidden_toggled(GtkToggleButton *btn, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
     self->show_hidden = gtk_toggle_button_get_active(btn);
-    if (self->current_path) load_directory(self, self->current_path);
+    
+    if (self->name_filter) {
+        gtk_filter_changed(GTK_FILTER(self->name_filter), GTK_FILTER_CHANGE_DIFFERENT);
+    }
+    update_statusbar(self);
 }
 
 
@@ -100,7 +104,7 @@ static void aether_window_init(AetherWindow *self) {
 
     /* 1. More actions */
     GtkWidget *more_btn = gtk_menu_button_new();
-    gtk_button_set_icon_name(GTK_BUTTON(more_btn), "view-more-symbolic");
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(more_btn), "view-more-symbolic");
     gtk_widget_add_css_class(more_btn, "flat");
 
     /* 2. Sort */
@@ -122,7 +126,7 @@ static void aether_window_init(AetherWindow *self) {
     gtk_popover_set_child(GTK_POPOVER(sort_popover), sort_box);
 
     self->sort_btn = gtk_menu_button_new();
-    gtk_button_set_icon_name(GTK_BUTTON(self->sort_btn), self->sort_asc ? "view-sort-ascending-symbolic" : "view-sort-descending-symbolic");
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(self->sort_btn), self->sort_asc ? "view-sort-ascending-symbolic" : "view-sort-descending-symbolic");
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->sort_btn), sort_popover);
     gtk_widget_add_css_class(self->sort_btn, "flat");
 

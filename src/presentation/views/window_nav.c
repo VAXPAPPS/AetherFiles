@@ -27,6 +27,9 @@ void update_nav_buttons(AetherWindow *self) {
 }
 
 void update_statusbar(AetherWindow *self) {
+    if (self->filter_model) {
+        self->item_count = g_list_model_get_n_items(G_LIST_MODEL(self->filter_model));
+    }
     char *text = g_strdup_printf("%u items", self->item_count);
     gtk_label_set_text(GTK_LABEL(self->status_label), text);
     g_free(text);
@@ -105,22 +108,14 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
                           AETHER_FILE_REPOSITORY(source), res, &err);
     if (err) { g_printerr("Error: %s\n", err->message); g_error_free(err); return; }
 
-    /* Filter hidden files */
     GListStore *visible = g_list_store_new(AETHER_TYPE_FILE_ENTITY);
     guint n = g_list_model_get_n_items(raw);
-    self->item_count = 0;
     for (guint i = 0; i < n; i++) {
         AetherFileEntity *e = AETHER_FILE_ENTITY(g_list_model_get_item(raw, i));
-        const char *name = aether_file_entity_get_name(e);
-        if (!self->show_hidden && name && name[0] == '.') {
-            g_object_unref(e);
-            continue;
-        }
         g_list_store_append(visible, e);
         g_object_unref(e);
-        self->item_count++;
     }
-    g_printerr("Loaded %u items, %u visible\n", n, self->item_count);
+    g_printerr("Loaded %u items\n", n);
     g_object_unref(raw);
 
     /* Sort with self context so sort_mode/sort_asc are used */

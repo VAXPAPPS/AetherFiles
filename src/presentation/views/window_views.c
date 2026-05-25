@@ -166,6 +166,14 @@ gint compare_entities(gconstpointer a, gconstpointer b, gpointer user_data) {
     if (d1 && !d2) return GTK_ORDERING_SMALLER;
     if (!d1 && d2) return GTK_ORDERING_LARGER;
 
+    /* Normal before hidden */
+    const char *n1 = aether_file_entity_get_name(f1);
+    const char *n2 = aether_file_entity_get_name(f2);
+    gboolean h1 = n1 && n1[0] == '.';
+    gboolean h2 = n2 && n2[0] == '.';
+    if (!h1 && h2) return GTK_ORDERING_SMALLER;
+    if (h1 && !h2) return GTK_ORDERING_LARGER;
+
     int cmp = 0;
     switch (self ? self->sort_mode : 0) {
     case 1: /* Size */
@@ -206,10 +214,17 @@ gint compare_entities(gconstpointer a, gconstpointer b, gpointer user_data) {
 
 gboolean name_filter_func(gpointer item, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
-    if (!self->filter_string || self->filter_string[0] == '\0') return TRUE;
     AetherFileEntity *e = AETHER_FILE_ENTITY(item);
     const char *name = aether_file_entity_get_name(e);
     if (!name) return FALSE;
+    
+    /* Filter hidden files */
+    if (!self->show_hidden && name[0] == '.') {
+        return FALSE;
+    }
+    
+    if (!self->filter_string || self->filter_string[0] == '\0') return TRUE;
+
     char *name_lower   = g_utf8_casefold(name, -1);
     char *filter_lower = g_utf8_casefold(self->filter_string, -1);
     gboolean match = strstr(name_lower, filter_lower) != NULL;

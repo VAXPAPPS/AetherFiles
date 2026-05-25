@@ -139,7 +139,7 @@ void on_sort_dir_clicked(GtkButton *btn, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
     self->sort_asc = !self->sort_asc;
     if (self->sort_btn) {
-        gtk_button_set_icon_name(GTK_BUTTON(self->sort_btn),
+        gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(self->sort_btn),
             self->sort_asc ? "view-sort-ascending-symbolic"
                            : "view-sort-descending-symbolic");
     }
@@ -149,9 +149,18 @@ void on_sort_dir_clicked(GtkButton *btn, gpointer user_data) {
 }
 
 void on_toggle_hidden(GSimpleAction *action, GVariant *param, gpointer user_data) {
+    (void)action; (void)param;
     AetherWindow *self = AETHER_WINDOW(user_data);
     self->show_hidden = !self->show_hidden;
-    load_directory(self, self->current_path);
+    
+    if (self->btn_hidden) {
+        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(self->btn_hidden), self->show_hidden);
+    }
+    
+    if (self->name_filter) {
+        gtk_filter_changed(GTK_FILTER(self->name_filter), GTK_FILTER_CHANGE_DIFFERENT);
+    }
+    update_statusbar(self);
 }
 
 gboolean on_key_back(GtkWidget *w, GVariant *args, gpointer ud) {
