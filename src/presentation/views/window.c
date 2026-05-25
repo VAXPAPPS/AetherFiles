@@ -320,8 +320,6 @@ static void aether_window_init(AetherWindow *self) {
             n++;
         self->bookmark_row_start = n;
     }
-    add_sidebar_separator(self);
-    add_sidebar_header(self, "BOOKMARKS");
     self->bookmark_row_start += 2; /* account for sep + header */
     load_bookmarks(self);
 

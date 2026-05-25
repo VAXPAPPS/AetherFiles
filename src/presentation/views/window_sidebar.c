@@ -95,8 +95,8 @@ void add_sidebar_separator(AetherWindow *self) {
     GtkWidget *row = gtk_list_box_row_new();
     gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
     gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(row), FALSE);
-    gtk_widget_set_margin_top(sep, 4);
-    gtk_widget_set_margin_bottom(sep, 4);
+    gtk_widget_set_margin_top(sep, 0);
+    gtk_widget_set_margin_bottom(sep, 0);
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), sep);
     gtk_list_box_append(GTK_LIST_BOX(self->sidebar_list), row);
 }
@@ -162,7 +162,6 @@ void setup_sidebar(AetherWindow *self) {
     gtk_widget_add_css_class(self->sidebar_list, "navigation-sidebar");
 
     /* Pinned */
-    add_sidebar_header(self, "PINNED");
     add_sidebar_place(self, "Recent",    "document-open-recent-symbolic", g_get_home_dir());
     add_sidebar_place(self, "Starred",   "starred-symbolic",              g_get_home_dir());
     add_sidebar_place(self, "Home",      "user-home-symbolic",            g_get_home_dir());
@@ -180,7 +179,6 @@ void setup_sidebar(AetherWindow *self) {
 
 
     /* Places */
-    add_sidebar_header(self, "PLACES");
     add_sidebar_place(self, "Desktop",   "user-desktop-symbolic",
                       g_get_user_special_dir(G_USER_DIRECTORY_DESKTOP));
     add_sidebar_place(self, "Documents", "folder-documents-symbolic",
@@ -197,7 +195,6 @@ void setup_sidebar(AetherWindow *self) {
 
 
     /* Drives */
-    add_sidebar_header(self, "DEVICES");
 
     g_signal_connect(self->drive_mgr, "drives-changed", G_CALLBACK(refresh_devices_sidebar), self);
     refresh_devices_sidebar(self->drive_mgr, self);
