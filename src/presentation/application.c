@@ -210,6 +210,111 @@ static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer
     aether_window_reload(win);
 }
 
+static void on_restore_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    AetherApplication *app = AETHER_APPLICATION(user_data);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+    
+    GStrv paths = aether_window_get_selected_paths(win);
+    if (!paths) return;
+    
+    for (int i = 0; paths[i]; i++) {
+        GFile *file = g_file_parse_name(paths[i]);
+        GFileInfo *info = g_file_query_info(file, G_FILE_ATTRIBUTE_TRASH_ORIG_PATH, 
+                                            G_FILE_QUERY_INFO_NONE, NULL, NULL);
+        if (info) {
+            const char *orig_path = g_file_info_get_attribute_byte_string(info, G_FILE_ATTRIBUTE_TRASH_ORIG_PATH);
+            if (orig_path) {
+                GFile *dest = g_file_parse_name(orig_path);
+                GError *err = NULL;
+                g_file_move(file, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+                if (err) {
+                    g_printerr("Restore error: %s\n", err->message);
+                    g_error_free(err);
+                }
+                g_object_unref(dest);
+            }
+            g_object_unref(info);
+        }
+        g_object_unref(file);
+    }
+    g_strfreev(paths);
+    aether_window_reload(win);
+}
+
+static void on_delete_permanently_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    AetherApplication *app = AETHER_APPLICATION(user_data);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+    
+    GStrv paths = aether_window_get_selected_paths(win);
+    if (!paths) return;
+    
+    for (int i = 0; paths[i]; i++) {
+        GFile *file = g_file_parse_name(paths[i]);
+        GError *err = NULL;
+        g_file_delete(file, NULL, &err);
+        if (err) {
+            g_printerr("Delete error: %s\n", err->message);
+            g_error_free(err);
+        }
+        g_object_unref(file);
+    }
+    g_strfreev(paths);
+    aether_window_reload(win);
+}
+
+static void on_empty_trash_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    AetherApplication *app = AETHER_APPLICATION(user_data);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+
+    GFile *trash = g_file_parse_name("trash:///");
+    GFileEnumerator *e = g_file_enumerate_children(trash, "standard::name", G_FILE_QUERY_INFO_NONE, NULL, NULL);
+    if (e) {
+        GFileInfo *info;
+        while ((info = g_file_enumerator_next_file(e, NULL, NULL)) != NULL) {
+            GFile *child = g_file_enumerator_get_child(e, info);
+            g_file_delete(child, NULL, NULL);
+            g_object_unref(child);
+            g_object_unref(info);
+        }
+        g_object_unref(e);
+    }
+    g_object_unref(trash);
+    aether_window_reload(win);
+}
+
+static void on_restore_all_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    AetherApplication *app = AETHER_APPLICATION(user_data);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+
+    GFile *trash = g_file_parse_name("trash:///");
+    GFileEnumerator *e = g_file_enumerate_children(trash, "standard::name," G_FILE_ATTRIBUTE_TRASH_ORIG_PATH, G_FILE_QUERY_INFO_NONE, NULL, NULL);
+    if (e) {
+        GFileInfo *info;
+        while ((info = g_file_enumerator_next_file(e, NULL, NULL)) != NULL) {
+            const char *orig_path = g_file_info_get_attribute_byte_string(info, G_FILE_ATTRIBUTE_TRASH_ORIG_PATH);
+            if (orig_path) {
+                GFile *child = g_file_enumerator_get_child(e, info);
+                GFile *dest = g_file_parse_name(orig_path);
+                g_file_move(child, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, NULL);
+                g_object_unref(dest);
+                g_object_unref(child);
+            }
+            g_object_unref(info);
+        }
+        g_object_unref(e);
+    }
+    g_object_unref(trash);
+    aether_window_reload(win);
+}
+
 /* ── properties ── */
 static void on_properties_response(GtkDialog *d, int response_id, gpointer ud) {
     (void)response_id; (void)ud;
@@ -327,6 +432,10 @@ static void aether_application_init(AetherApplication *app) {
         { "rename",         G_CALLBACK(on_rename_action),         NULL },
         { "rename-path",    G_CALLBACK(on_rename_path_action),    G_VARIANT_TYPE_STRING },
         { "trash",          G_CALLBACK(on_trash_action),          NULL },
+        { "restore",        G_CALLBACK(on_restore_action),        NULL },
+        { "delete-permanently", G_CALLBACK(on_delete_permanently_action), NULL },
+        { "empty-trash",    G_CALLBACK(on_empty_trash_action),    NULL },
+        { "restore-all",    G_CALLBACK(on_restore_all_action),    NULL },
         { "properties",     G_CALLBACK(on_properties_action),     G_VARIANT_TYPE_STRING },
         { "set_background", G_CALLBACK(on_set_background_action), G_VARIANT_TYPE_STRING },
         { NULL, NULL, NULL }

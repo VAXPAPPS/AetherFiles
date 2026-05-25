@@ -41,58 +41,79 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     }
 
     GMenu *menu = g_menu_new();
+    GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(box));
+    AetherWindow *self = AETHER_IS_WINDOW(root) ? AETHER_WINDOW(root) : NULL;
+    const char *current_path = self ? aether_window_get_current_path(self) : NULL;
+    gboolean in_trash = current_path && g_str_has_prefix(current_path, "trash:");
 
-    /* Open */
-    GMenu *s1 = g_menu_new();
-    GMenuItem *mi = g_menu_item_new("Open", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.open", g_variant_new_string(path));
-    g_menu_append_item(s1, mi); g_object_unref(mi);
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(s1)); g_object_unref(s1);
+    if (in_trash) {
+        GMenu *s1 = g_menu_new();
+        GMenuItem *mi = g_menu_item_new("Restore", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.restore", NULL);
+        g_menu_append_item(s1, mi); g_object_unref(mi);
+        
+        mi = g_menu_item_new("Delete Permanently", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.delete-permanently", NULL);
+        g_menu_append_item(s1, mi); g_object_unref(mi);
+        g_menu_append_section(menu, NULL, G_MENU_MODEL(s1)); g_object_unref(s1);
+        
+        GMenu *s2 = g_menu_new();
+        mi = g_menu_item_new("Properties", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.properties", g_variant_new_string(path ? path : ""));
+        g_menu_append_item(s2, mi); g_object_unref(mi);
+        g_menu_append_section(menu, NULL, G_MENU_MODEL(s2)); g_object_unref(s2);
+    } else {
+        /* Open */
+        GMenu *s1 = g_menu_new();
+        GMenuItem *mi = g_menu_item_new("Open", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.open", g_variant_new_string(path ? path : ""));
+        g_menu_append_item(s1, mi); g_object_unref(mi);
+        g_menu_append_section(menu, NULL, G_MENU_MODEL(s1)); g_object_unref(s1);
 
-    /* Clipboard */
-    GMenu *s2 = g_menu_new();
-    mi = g_menu_item_new("Cut",  NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.cut",  NULL);
-    g_menu_append_item(s2, mi); g_object_unref(mi);
-    mi = g_menu_item_new("Copy", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.copy", NULL);
-    g_menu_append_item(s2, mi); g_object_unref(mi);
-    mi = g_menu_item_new("Paste", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.paste", NULL);
-    g_menu_append_item(s2, mi); g_object_unref(mi);
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(s2)); g_object_unref(s2);
+        /* Clipboard */
+        GMenu *s2 = g_menu_new();
+        mi = g_menu_item_new("Cut",  NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.cut",  NULL);
+        g_menu_append_item(s2, mi); g_object_unref(mi);
+        mi = g_menu_item_new("Copy", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.copy", NULL);
+        g_menu_append_item(s2, mi); g_object_unref(mi);
+        mi = g_menu_item_new("Paste", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.paste", NULL);
+        g_menu_append_item(s2, mi); g_object_unref(mi);
+        g_menu_append_section(menu, NULL, G_MENU_MODEL(s2)); g_object_unref(s2);
 
-    /* Manage */
-    GMenu *s3 = g_menu_new();
-    mi = g_menu_item_new("Rename…", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.rename-path", g_variant_new_string(path));
-    g_menu_append_item(s3, mi); g_object_unref(mi);
-
-    if (!aether_file_entity_is_directory(entity)) {
-        mi = g_menu_item_new("Set as Background…", NULL);
-        g_menu_item_set_action_and_target_value(mi, "app.set_background", g_variant_new_string(path));
+        /* Manage */
+        GMenu *s3 = g_menu_new();
+        mi = g_menu_item_new("Rename…", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.rename-path", g_variant_new_string(path ? path : ""));
         g_menu_append_item(s3, mi); g_object_unref(mi);
-    }
 
-    mi = g_menu_item_new("Move to Trash", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.trash", NULL);
-    g_menu_append_item(s3, mi); g_object_unref(mi);
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(s3)); g_object_unref(s3);
+        if (!aether_file_entity_is_directory(entity)) {
+            mi = g_menu_item_new("Set as Background…", NULL);
+            g_menu_item_set_action_and_target_value(mi, "app.set_background", g_variant_new_string(path ? path : ""));
+            g_menu_append_item(s3, mi); g_object_unref(mi);
+        }
 
-    /* Properties + Bookmarks */
-    GMenu *s4 = g_menu_new();
-    if (aether_file_entity_is_directory(entity)) {
-        mi = g_menu_item_new("Add to Bookmarks", NULL);
-        g_menu_item_set_action_and_target_value(mi, "win.add-bookmark-path", g_variant_new_string(path));
+        mi = g_menu_item_new("Move to Trash", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.trash", NULL);
+        g_menu_append_item(s3, mi); g_object_unref(mi);
+        g_menu_append_section(menu, NULL, G_MENU_MODEL(s3)); g_object_unref(s3);
+
+        /* Properties + Bookmarks */
+        GMenu *s4 = g_menu_new();
+        if (aether_file_entity_is_directory(entity)) {
+            mi = g_menu_item_new("Add to Bookmarks", NULL);
+            g_menu_item_set_action_and_target_value(mi, "win.add-bookmark-path", g_variant_new_string(path ? path : ""));
+            g_menu_append_item(s4, mi); g_object_unref(mi);
+        }
+        mi = g_menu_item_new("Properties", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.properties", g_variant_new_string(path ? path : ""));
         g_menu_append_item(s4, mi); g_object_unref(mi);
+        g_menu_append_section(menu, NULL, G_MENU_MODEL(s4)); g_object_unref(s4);
     }
-    mi = g_menu_item_new("Properties", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.properties", g_variant_new_string(path));
-    g_menu_append_item(s4, mi); g_object_unref(mi);
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(s4)); g_object_unref(s4);
 
     GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
-    GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(box));
 
     if (root) {
         gtk_widget_set_parent(popover, root);
@@ -117,17 +138,29 @@ void on_background_right_clicked(GtkGestureClick *gesture, int n_press,
     const char *current_path = aether_window_get_current_path(self);
     if (!current_path) return;
 
+    gboolean in_trash = g_str_has_prefix(current_path, "trash:");
+
     GMenu *menu = g_menu_new();
 
-    /* Paste */
-    GMenuItem *mi = g_menu_item_new("Paste", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.paste", NULL);
-    g_menu_append_item(menu, mi); g_object_unref(mi);
+    if (in_trash) {
+        GMenuItem *mi = g_menu_item_new("Restore All", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.restore-all", NULL);
+        g_menu_append_item(menu, mi); g_object_unref(mi);
 
-    /* Properties */
-    mi = g_menu_item_new("Properties", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.properties", g_variant_new_string(current_path));
-    g_menu_append_item(menu, mi); g_object_unref(mi);
+        mi = g_menu_item_new("Empty Trash", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.empty-trash", NULL);
+        g_menu_append_item(menu, mi); g_object_unref(mi);
+    } else {
+        /* Paste */
+        GMenuItem *mi = g_menu_item_new("Paste", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.paste", NULL);
+        g_menu_append_item(menu, mi); g_object_unref(mi);
+
+        /* Properties */
+        mi = g_menu_item_new("Properties", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.properties", g_variant_new_string(current_path));
+        g_menu_append_item(menu, mi); g_object_unref(mi);
+    }
 
     GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
     GtkWidget *widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
