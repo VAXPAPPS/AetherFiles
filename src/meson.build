@@ -5,6 +5,11 @@ aetherfiles_sources = [
   'data/gio_file_repository.c',
   'presentation/application.c',
   'presentation/views/window.c',
+  'presentation/views/window_sidebar.c',
+  'presentation/views/window_views.c',
+  'presentation/views/window_nav.c',
+  'presentation/views/window_actions.c',
+  'presentation/views/window_tabs.c',
   'presentation/controllers/clipboard_controller.c',
 ]
 
