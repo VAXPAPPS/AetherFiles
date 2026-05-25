@@ -16,6 +16,7 @@ void setup_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
 
     GtkWidget *label = gtk_label_new("");
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_label_set_wrap_mode(GTK_LABEL(label), PANGO_WRAP_WORD_CHAR);
     gtk_label_set_max_width_chars(GTK_LABEL(label), 12);
     gtk_label_set_lines(GTK_LABEL(label), 2);
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
