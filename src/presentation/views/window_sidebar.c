@@ -1,5 +1,6 @@
 #include "window_private.h"
 #include <glib/gi18n.h>
+#include "../../domain/drive_entity.h"
 
 #define BOOKMARKS_FILE ".config/aetherfiles-bookmarks"
 
@@ -121,6 +122,38 @@ void add_sidebar_place(AetherWindow *self, const char *name,
     gtk_list_box_append(GTK_LIST_BOX(self->sidebar_list), row);
 }
 
+static void refresh_devices_sidebar(AetherDriveManager *mgr, AetherWindow *self) {
+    (void)mgr;
+    /* Remove old device rows */
+    GtkWidget *child = gtk_widget_get_first_child(self->sidebar_list);
+    while (child) {
+        GtkWidget *next = gtk_widget_get_next_sibling(child);
+        if (g_object_get_data(G_OBJECT(child), "is-device")) {
+            gtk_list_box_remove(GTK_LIST_BOX(self->sidebar_list), child);
+        }
+        child = next;
+    }
+
+    GListStore *drives = aether_drive_manager_get_drives(self->drive_mgr);
+    guint n = g_list_model_get_n_items(G_LIST_MODEL(drives));
+    for (guint i = 0; i < n; i++) {
+        AetherDriveEntity *entity = AETHER_DRIVE_ENTITY(g_list_model_get_item(G_LIST_MODEL(drives), i));
+        
+        GtkWidget *row = make_sidebar_row(aether_drive_entity_get_name(entity), aether_drive_entity_get_icon_name(entity));
+        g_object_set_data(G_OBJECT(row), "is-device", GINT_TO_POINTER(1));
+        
+        if (aether_drive_entity_is_mounted(entity)) {
+            g_object_set_data_full(G_OBJECT(row), "path", g_strdup(aether_drive_entity_get_path(entity)), g_free);
+        } else {
+            GVolume *vol = aether_drive_entity_get_volume(entity);
+            if (vol) g_object_set_data_full(G_OBJECT(row), "volume", g_object_ref(vol), g_object_unref);
+        }
+        
+        gtk_list_box_append(GTK_LIST_BOX(self->sidebar_list), row);
+        g_object_unref(entity);
+    }
+}
+
 void setup_sidebar(AetherWindow *self) {
     self->sidebar_list = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(self->sidebar_list), GTK_SELECTION_SINGLE);
@@ -166,28 +199,33 @@ void setup_sidebar(AetherWindow *self) {
     /* Drives */
     add_sidebar_header(self, "DEVICES");
 
-    GVolumeMonitor *vm = g_volume_monitor_get();
-    GList *mounts = g_volume_monitor_get_mounts(vm);
-    for (GList *l = mounts; l != NULL; l = l->next) {
-        GMount *mount = G_MOUNT(l->data);
-        char   *name  = g_mount_get_name(mount);
-        GFile  *root  = g_mount_get_root(mount);
-        char   *mpath = g_file_get_path(root);
-        if (mpath) {
-            GtkWidget *row = make_sidebar_row(name, "drive-harddisk-symbolic");
-            g_object_set_data_full(G_OBJECT(row), "path", g_strdup(mpath), g_free);
-            gtk_list_box_append(GTK_LIST_BOX(self->sidebar_list), row);
-        }
-        g_free(name); g_free(mpath);
-        g_object_unref(root);
+    g_signal_connect(self->drive_mgr, "drives-changed", G_CALLBACK(refresh_devices_sidebar), self);
+    refresh_devices_sidebar(self->drive_mgr, self);
+}
+
+static void on_mount_ready(GObject *source, GAsyncResult *res, gpointer user_data) {
+    AetherWindow *self = AETHER_WINDOW(user_data);
+    GError *err = NULL;
+    if (aether_drive_manager_mount_finish(self->drive_mgr, res, &err)) {
+        /* Success, the drives-changed signal will fire and update the sidebar.
+           We could try to navigate to it, but finding the path here is tricky without the entity.
+           Let's just let it mount for now. */
+    } else {
+        g_printerr("Failed to mount: %s\n", err->message);
+        g_error_free(err);
     }
-    g_list_free_full(mounts, g_object_unref);
-    g_object_unref(vm);
 }
 
 void on_sidebar_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer user_data) {
+    (void)box;
     AetherWindow *self = AETHER_WINDOW(user_data);
     const char *path = g_object_get_data(G_OBJECT(row), "path");
-    if (path) load_directory(self, path);
+    GVolume *vol = g_object_get_data(G_OBJECT(row), "volume");
+    
+    if (path) {
+        load_directory(self, path);
+    } else if (vol) {
+        aether_drive_manager_mount_async(self->drive_mgr, vol, NULL, on_mount_ready, self);
+    }
 }
 

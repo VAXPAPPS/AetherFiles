@@ -1,8 +1,10 @@
 aetherfiles_sources = [
   'main.c',
   'domain/file_entity.c',
+  'domain/drive_entity.c',
   'domain/file_repository.c',
   'data/gio_file_repository.c',
+  'data/drive_manager.c',
   'presentation/application.c',
   'presentation/views/window.c',
   'presentation/views/window_sidebar.c',

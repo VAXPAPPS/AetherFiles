@@ -25,6 +25,7 @@ static void load_css(void) {
 static void aether_window_dispose(GObject *object) {
     AetherWindow *self = AETHER_WINDOW(object);
     g_clear_object(&self->repo);
+    g_clear_object(&self->drive_mgr);
     if (self->dir_monitor) {
         g_file_monitor_cancel(self->dir_monitor);
         g_clear_object(&self->dir_monitor);
@@ -75,6 +76,7 @@ static void aether_window_init(AetherWindow *self) {
     load_css();
 
     self->repo = AETHER_FILE_REPOSITORY(aether_gio_file_repository_new());
+    self->drive_mgr = aether_drive_manager_new();
 
     /* ══ Sidebar ══ */
     setup_sidebar(self);

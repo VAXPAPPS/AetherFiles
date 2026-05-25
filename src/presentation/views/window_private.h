@@ -3,6 +3,7 @@
 
 #include "window.h"
 #include "../../data/gio_file_repository.h"
+#include "../../data/drive_manager.h"
 #include "../controllers/clipboard_controller.h"
 #include <gio/gio.h>
 #include <gtk/gtk.h>
@@ -12,6 +13,7 @@
 struct _AetherWindow {
     GtkApplicationWindow    parent_instance;
     AetherFileRepository   *repo;
+    AetherDriveManager     *drive_mgr;
     AetherClipboardController *clipboard;
 
     char    *current_path;
