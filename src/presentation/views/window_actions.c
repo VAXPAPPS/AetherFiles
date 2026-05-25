@@ -200,35 +200,75 @@ gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
 {
     (void)t; (void)x; (void)y;
     AetherWindow *w = AETHER_WINDOW(ud);
-    if (!G_VALUE_HOLDS(val, G_TYPE_FILE)) return FALSE;
-    GFile *src_file = G_FILE(g_value_get_object(val));
-    if (!src_file || !w->current_path) return FALSE;
-    char *src_path  = g_file_get_path(src_file);
-    char *basename  = g_path_get_basename(src_path);
-    char *dest_path = g_build_filename(w->current_path, basename, NULL);
-    GFile *dest = g_file_new_for_path(dest_path);
-    GError *err = NULL;
-    g_file_move(src_file, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
-    if (err) { g_printerr("DnD error: %s\n", err->message); g_error_free(err); }
-    else { aether_file_repository_list_directory_async(
-               w->repo, w->current_path, NULL, on_directory_loaded, w); }
-    g_free(src_path); g_free(basename); g_free(dest_path);
-    g_object_unref(dest);
+    if (!G_VALUE_HOLDS(val, GDK_TYPE_FILE_LIST)) return FALSE;
+    
+    GdkFileList *file_list = g_value_get_boxed(val);
+    if (!file_list || !w->current_path) return FALSE;
+    
+    GSList *files = gdk_file_list_get_files(file_list);
+    gboolean success = FALSE;
+    for (GSList *l = files; l != NULL; l = l->next) {
+        GFile *src_file = G_FILE(l->data);
+        char *src_path  = g_file_get_path(src_file);
+        if (!src_path) continue;
+        
+        char *basename  = g_path_get_basename(src_path);
+        char *dest_path = g_build_filename(w->current_path, basename, NULL);
+        GFile *dest = g_file_new_for_path(dest_path);
+        
+        GError *err = NULL;
+        if (g_file_move(src_file, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &err)) {
+            success = TRUE;
+        } else {
+            g_printerr("DnD error: %s\n", err->message);
+            g_error_free(err);
+        }
+        g_free(src_path);
+        g_free(basename);
+        g_free(dest_path);
+        g_object_unref(dest);
+    }
+    
+    if (success) {
+        aether_window_reload(w);
+    }
+    
     return TRUE;
 }
 
 void setup_drag_drop(AetherWindow *self, GtkWidget *view) {
-    GtkDropTarget *target = gtk_drop_target_new(G_TYPE_FILE,
+    GtkDropTarget *target = gtk_drop_target_new(GDK_TYPE_FILE_LIST,
                                 GDK_ACTION_MOVE | GDK_ACTION_COPY);
     g_signal_connect(target, "drop", G_CALLBACK(on_drop_target), self);
     gtk_widget_add_controller(view, GTK_EVENT_CONTROLLER(target));
 }
 
-void on_drag_prepare(GtkDragSource *source, double x, double y,
+GdkContentProvider *on_drag_prepare(GtkDragSource *source, double x, double y,
                              gpointer user_data)
 {
-    /* We store a content provider with the file URI when drag starts */
-    (void)source; (void)x; (void)y; (void)user_data;
+    (void)source; (void)x; (void)y;
+    GtkListItem *list_item = GTK_LIST_ITEM(user_data);
+    gpointer item = gtk_list_item_get_item(list_item);
+    if (!item || !AETHER_IS_FILE_ENTITY(item)) return NULL;
+    
+    AetherFileEntity *entity = AETHER_FILE_ENTITY(item);
+    const char *path = aether_file_entity_get_path(entity);
+    if (!path) return NULL;
+    
+    GFile *file = g_file_new_for_path(path);
+    GSList *files = NULL;
+    files = g_slist_append(files, file);
+    
+    GdkFileList *file_list = gdk_file_list_new_from_list(files);
+    GValue value = G_VALUE_INIT;
+    g_value_init(&value, GDK_TYPE_FILE_LIST);
+    g_value_take_boxed(&value, file_list);
+    
+    GdkContentProvider *provider = gdk_content_provider_new_for_value(&value);
+    g_value_unset(&value);
+    g_slist_free_full(files, g_object_unref);
+    
+    return provider;
 }
 
 gboolean on_undo_shortcut(GtkWidget *w, GVariant *a, gpointer ud) {

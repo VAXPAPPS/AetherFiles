@@ -124,7 +124,7 @@ void on_add_bookmark_action(GSimpleAction *a, GVariant *p, gpointer ud);
 void on_add_bookmark_path_action(GSimpleAction *a, GVariant *p, gpointer ud);
 gboolean on_drop_target(GtkDropTarget *t, const GValue *val, double x, double y, gpointer ud);
 void setup_drag_drop(AetherWindow *self, GtkWidget *view);
-void on_drag_prepare(GtkDragSource *source, double x, double y, gpointer user_data);
+GdkContentProvider *on_drag_prepare(GtkDragSource *source, double x, double y, gpointer user_data);
 gboolean on_undo_shortcut(GtkWidget *w, GVariant *a, gpointer ud);
 gboolean on_ctrl_h_shortcut(GtkWidget *w, GVariant *a, gpointer ud);
 gboolean on_ctrl_d_shortcut(GtkWidget *w, GVariant *a, gpointer ud);

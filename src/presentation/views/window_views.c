@@ -30,6 +30,11 @@ void setup_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     g_signal_connect(g, "pressed", G_CALLBACK(on_item_right_clicked), li);
     gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(g));
 
+    GtkDragSource *source = gtk_drag_source_new();
+    gtk_drag_source_set_actions(source, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+    g_signal_connect(source, "prepare", G_CALLBACK(on_drag_prepare), li);
+    gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(source));
+
     gtk_list_item_set_child(li, box);
 }
 
@@ -75,6 +80,11 @@ void setup_list_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(g), GDK_BUTTON_SECONDARY);
     g_signal_connect(g, "pressed", G_CALLBACK(on_item_right_clicked), li);
     gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(g));
+
+    GtkDragSource *source = gtk_drag_source_new();
+    gtk_drag_source_set_actions(source, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+    g_signal_connect(source, "prepare", G_CALLBACK(on_drag_prepare), li);
+    gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(source));
 
     gtk_list_item_set_child(li, box);
 }
