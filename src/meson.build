@@ -16,6 +16,7 @@ aetherfiles_sources = [
   'presentation/views/window_tabs.c',
   'presentation/views/window_context_menu.c',
   'presentation/views/window_apps.c',
+  'presentation/views/app_uninstall_dialog.c',
   'presentation/controllers/clipboard_controller.c',
 ]
 
