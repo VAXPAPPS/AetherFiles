@@ -357,7 +357,7 @@ GStrv aether_window_get_selected_paths(AetherWindow *self) {
 
     GtkBitset *bitset = gtk_selection_model_get_selection(sel);
     if (!bitset || gtk_bitset_is_empty(bitset)) {
-        if (bitset) g_object_unref(bitset);
+        if (bitset) gtk_bitset_unref(bitset);
         return NULL;
     }
 
@@ -376,7 +376,7 @@ GStrv aether_window_get_selected_paths(AetherWindow *self) {
             }
         } while (gtk_bitset_iter_next(&iter, &val));
     }
-    g_object_unref(bitset);
+    gtk_bitset_unref(bitset);
 
     if (paths->len == 0) {
         g_ptr_array_unref(paths);

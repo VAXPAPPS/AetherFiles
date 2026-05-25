@@ -153,11 +153,14 @@ static void on_rename_action(GSimpleAction *action, GVariant *parameter, gpointe
 
 static void on_rename_path_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action;
+    g_printerr("DEBUG: on_rename_path_action triggered.\n");
     AetherApplication *app = AETHER_APPLICATION(user_data);
     AetherWindow *win = get_active_win(G_APPLICATION(app));
+    g_printerr("DEBUG: win is %p\n", win);
     if (!win) return;
     
     const char *path = g_variant_get_string(parameter, NULL);
+    g_printerr("DEBUG: path is %s\n", path);
     if (!path) return;
 
     GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(win),

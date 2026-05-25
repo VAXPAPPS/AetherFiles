@@ -1,9 +1,14 @@
 #include "window_private.h"
 #include <glib/gi18n.h>
 
+static gboolean idle_unparent(gpointer data) {
+    gtk_widget_unparent(GTK_WIDGET(data));
+    return G_SOURCE_REMOVE;
+}
+
 void on_popover_closed(GtkPopover *popover, gpointer user_data) {
     (void)user_data;
-    gtk_widget_unparent(GTK_WIDGET(popover));
+    g_idle_add(idle_unparent, popover);
 }
 
 void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
@@ -17,7 +22,6 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     AetherFileEntity *entity = AETHER_FILE_ENTITY(item);
     GtkWidget *box = gtk_list_item_get_child(list_item);
     const char *path = aether_file_entity_get_path(entity);
-    GVariant   *pv   = g_variant_new_string(path);
 
     if (!gtk_list_item_get_selected(list_item)) {
         GtkWidget *parent_view = gtk_widget_get_ancestor(box, GTK_TYPE_GRID_VIEW);
@@ -41,7 +45,7 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     /* Open */
     GMenu *s1 = g_menu_new();
     GMenuItem *mi = g_menu_item_new("Open", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.open", pv);
+    g_menu_item_set_action_and_target_value(mi, "app.open", g_variant_new_string(path));
     g_menu_append_item(s1, mi); g_object_unref(mi);
     g_menu_append_section(menu, NULL, G_MENU_MODEL(s1)); g_object_unref(s1);
 
@@ -61,12 +65,12 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     /* Manage */
     GMenu *s3 = g_menu_new();
     mi = g_menu_item_new("Rename…", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.rename-path", pv);
+    g_menu_item_set_action_and_target_value(mi, "app.rename-path", g_variant_new_string(path));
     g_menu_append_item(s3, mi); g_object_unref(mi);
 
     if (!aether_file_entity_is_directory(entity)) {
         mi = g_menu_item_new("Set as Background…", NULL);
-        g_menu_item_set_action_and_target_value(mi, "app.set_background", pv);
+        g_menu_item_set_action_and_target_value(mi, "app.set_background", g_variant_new_string(path));
         g_menu_append_item(s3, mi); g_object_unref(mi);
     }
 
@@ -79,11 +83,11 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     GMenu *s4 = g_menu_new();
     if (aether_file_entity_is_directory(entity)) {
         mi = g_menu_item_new("Add to Bookmarks", NULL);
-        g_menu_item_set_action_and_target_value(mi, "win.add-bookmark-path", pv);
+        g_menu_item_set_action_and_target_value(mi, "win.add-bookmark-path", g_variant_new_string(path));
         g_menu_append_item(s4, mi); g_object_unref(mi);
     }
     mi = g_menu_item_new("Properties", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.properties", pv);
+    g_menu_item_set_action_and_target_value(mi, "app.properties", g_variant_new_string(path));
     g_menu_append_item(s4, mi); g_object_unref(mi);
     g_menu_append_section(menu, NULL, G_MENU_MODEL(s4)); g_object_unref(s4);
 
