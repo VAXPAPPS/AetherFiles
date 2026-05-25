@@ -46,6 +46,7 @@ struct _AetherWindow {
 
     GtkFilterListModel *filter_model;
     GtkCustomFilter    *name_filter;
+    GtkCustomSorter    *sorter;
     char               *filter_string;
 
     int     sort_mode;

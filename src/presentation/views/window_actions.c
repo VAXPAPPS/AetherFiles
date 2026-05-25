@@ -129,9 +129,15 @@ void on_sort_mode_changed(GtkDropDown *dropdown, GParamSpec *pspec,
     (void)pspec;
     AetherWindow *self = AETHER_WINDOW(user_data);
     self->sort_mode = (int)gtk_drop_down_get_selected(dropdown);
-    if (self->current_path)
-        aether_file_repository_list_directory_async(
-            self->repo, self->current_path, NULL, on_directory_loaded, self);
+    
+    if (self->sort_btn) {
+        GtkWidget *popover = gtk_menu_button_get_popover(GTK_MENU_BUTTON(self->sort_btn));
+        if (popover) gtk_popover_popdown(GTK_POPOVER(popover));
+    }
+    
+    if (self->sorter) {
+        gtk_sorter_changed(GTK_SORTER(self->sorter), GTK_SORTER_CHANGE_DIFFERENT);
+    }
 }
 
 void on_sort_dir_clicked(GtkButton *btn, gpointer user_data) {
@@ -142,10 +148,13 @@ void on_sort_dir_clicked(GtkButton *btn, gpointer user_data) {
         gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(self->sort_btn),
             self->sort_asc ? "view-sort-ascending-symbolic"
                            : "view-sort-descending-symbolic");
+        GtkWidget *popover = gtk_menu_button_get_popover(GTK_MENU_BUTTON(self->sort_btn));
+        if (popover) gtk_popover_popdown(GTK_POPOVER(popover));
     }
-    if (self->current_path)
-        aether_file_repository_list_directory_async(
-            self->repo, self->current_path, NULL, on_directory_loaded, self);
+    
+    if (self->sorter) {
+        gtk_sorter_changed(GTK_SORTER(self->sorter), GTK_SORTER_CHANGE_DIFFERENT);
+    }
 }
 
 void on_toggle_hidden(GSimpleAction *action, GVariant *param, gpointer user_data) {

@@ -126,6 +126,7 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
 
     self->filter_model = filtered;
     self->name_filter  = filter;
+    self->sorter       = sorter;
 
     gtk_grid_view_set_model(GTK_GRID_VIEW(self->grid_view), NULL);
     gtk_column_view_set_model(GTK_COLUMN_VIEW(self->list_view), NULL);
