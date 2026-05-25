@@ -4,6 +4,7 @@
 #include "window.h"
 #include "../../data/gio_file_repository.h"
 #include "../../data/drive_manager.h"
+#include "../../data/app_repository.h"
 #include "../controllers/clipboard_controller.h"
 #include <gio/gio.h>
 #include <gtk/gtk.h>
@@ -14,6 +15,7 @@ struct _AetherWindow {
     GtkApplicationWindow    parent_instance;
     AetherFileRepository   *repo;
     AetherDriveManager     *drive_mgr;
+    AetherAppRepository    *app_repo;
     AetherClipboardController *clipboard;
 
     char    *current_path;
@@ -27,6 +29,7 @@ struct _AetherWindow {
 
     GtkWidget *grid_view;
     GtkWidget *list_view;
+    GtkWidget *apps_view;
     GtkWidget *view_stack;
 
     GtkWidget *path_bar;
@@ -147,5 +150,9 @@ void new_tab(AetherWindow *self, const char *path);
 void close_tab(AetherWindow *self, int idx);
 gboolean on_new_tab_shortcut(GtkWidget *w, GVariant *a, gpointer ud);
 gboolean on_close_tab_shortcut(GtkWidget *w, GVariant *a, gpointer ud);
+
+/* window_apps.h included here to avoid circular dependencies if possible, or we just declare functions */
+GtkWidget *setup_apps_view(AetherWindow *self);
+void show_apps_view(AetherWindow *self);
 
 #endif // AETHER_WINDOW_PRIVATE_H

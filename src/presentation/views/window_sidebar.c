@@ -176,7 +176,7 @@ void setup_sidebar(AetherWindow *self) {
     add_sidebar_place(self, "Work",      "folder-development-symbolic",   work_path);
     g_free(work_path);
 
-    add_sidebar_place(self, "Apps",      "application-x-executable-symbolic", NULL);
+    add_sidebar_place(self, "Apps",      "application-x-executable-symbolic", "apps:///");
 
 
     /* Places */
@@ -223,7 +223,23 @@ void on_sidebar_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer user
     GVolume *vol = g_object_get_data(G_OBJECT(row), "volume");
     
     if (path) {
-        load_directory(self, path);
+        if (g_strcmp0(path, "apps:///") == 0) {
+            show_apps_view(self);
+        } else {
+            /* If we navigate to a real path, show grid or list view again */
+            if (self->view_stack) {
+                if (gtk_widget_has_css_class(self->btn_grid, "active-view")) {
+                    gtk_stack_set_visible_child_name(GTK_STACK(self->view_stack), "grid");
+                } else {
+                    gtk_stack_set_visible_child_name(GTK_STACK(self->view_stack), "list");
+                }
+                gtk_widget_set_visible(self->path_bar, TRUE);
+                gtk_widget_set_visible(self->sort_btn, TRUE);
+                gtk_widget_set_visible(self->btn_grid, TRUE);
+                gtk_widget_set_visible(self->btn_list, TRUE);
+            }
+            load_directory(self, path);
+        }
     } else if (vol) {
         aether_drive_manager_mount_async(self->drive_mgr, vol, NULL, on_mount_ready, self);
     }

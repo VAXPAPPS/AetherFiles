@@ -26,6 +26,7 @@ static void aether_window_dispose(GObject *object) {
     AetherWindow *self = AETHER_WINDOW(object);
     g_clear_object(&self->repo);
     g_clear_object(&self->drive_mgr);
+    g_clear_object(&self->app_repo);
     if (self->dir_monitor) {
         g_file_monitor_cancel(self->dir_monitor);
         g_clear_object(&self->dir_monitor);
@@ -77,6 +78,7 @@ static void aether_window_init(AetherWindow *self) {
 
     self->repo = AETHER_FILE_REPOSITORY(aether_gio_file_repository_new());
     self->drive_mgr = aether_drive_manager_new();
+    self->app_repo = aether_app_repository_new();
 
     /* ══ Sidebar ══ */
     setup_sidebar(self);
@@ -158,6 +160,10 @@ static void aether_window_init(AetherWindow *self) {
 
     gtk_stack_add_named(GTK_STACK(self->view_stack), grid_scrolled, "grid");
     gtk_stack_add_named(GTK_STACK(self->view_stack), list_scrolled, "list");
+
+    /* Apps View */
+    self->apps_view = setup_apps_view(self);
+    gtk_stack_add_named(GTK_STACK(self->view_stack), self->apps_view, "apps");
 
     /* ══ Search bar ══ */
     self->search_entry = gtk_search_entry_new();

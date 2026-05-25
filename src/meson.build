@@ -2,9 +2,11 @@ aetherfiles_sources = [
   'main.c',
   'domain/file_entity.c',
   'domain/drive_entity.c',
+  'domain/app_entity.c',
   'domain/file_repository.c',
   'data/gio_file_repository.c',
   'data/drive_manager.c',
+  'data/app_repository.c',
   'presentation/application.c',
   'presentation/views/window.c',
   'presentation/views/window_sidebar.c',
@@ -13,6 +15,7 @@ aetherfiles_sources = [
   'presentation/views/window_actions.c',
   'presentation/views/window_tabs.c',
   'presentation/views/window_context_menu.c',
+  'presentation/views/window_apps.c',
   'presentation/controllers/clipboard_controller.c',
 ]
 
