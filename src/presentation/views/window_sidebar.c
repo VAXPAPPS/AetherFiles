@@ -134,7 +134,17 @@ void setup_sidebar(AetherWindow *self) {
     add_sidebar_place(self, "Starred",   "starred-symbolic",              g_get_home_dir());
     add_sidebar_place(self, "Home",      "user-home-symbolic",            g_get_home_dir());
 
-    add_sidebar_separator(self);
+    char *work_path = g_build_filename(g_get_home_dir(), "Work", NULL);
+    GFile *work_dir_file = g_file_new_for_path(work_path);
+    if (!g_file_query_exists(work_dir_file, NULL)) {
+        g_file_make_directory_with_parents(work_dir_file, NULL, NULL);
+    }
+    g_object_unref(work_dir_file);
+    add_sidebar_place(self, "Work",      "folder-development-symbolic",   work_path);
+    g_free(work_path);
+
+    add_sidebar_place(self, "Apps",      "application-x-executable-symbolic", NULL);
+
 
     /* Places */
     add_sidebar_header(self, "PLACES");
@@ -150,14 +160,8 @@ void setup_sidebar(AetherWindow *self) {
                       g_get_user_special_dir(G_USER_DIRECTORY_PICTURES));
     add_sidebar_place(self, "Videos",    "folder-videos-symbolic",
                       g_get_user_special_dir(G_USER_DIRECTORY_VIDEOS));
-    char *work_path = g_build_filename(g_get_home_dir(), "Work", NULL);
-    add_sidebar_place(self, "Work",      "folder-development-symbolic",   work_path);
-    g_free(work_path);
-
-    add_sidebar_place(self, "Apps",      "application-x-executable-symbolic", NULL);
     add_sidebar_place(self, "Trash",     "user-trash-symbolic",           "trash:///");
 
-    add_sidebar_separator(self);
 
     /* Drives */
     add_sidebar_header(self, "DEVICES");
