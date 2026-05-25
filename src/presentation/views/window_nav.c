@@ -132,6 +132,9 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
     self->filter_model = filtered;
     self->name_filter  = filter;
 
+    gtk_grid_view_set_model(GTK_GRID_VIEW(self->grid_view), NULL);
+    gtk_column_view_set_model(GTK_COLUMN_VIEW(self->list_view), NULL);
+
     GtkMultiSelection *grid_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
     gtk_grid_view_set_model(GTK_GRID_VIEW(self->grid_view), GTK_SELECTION_MODEL(grid_sel));
     g_object_unref(grid_sel);

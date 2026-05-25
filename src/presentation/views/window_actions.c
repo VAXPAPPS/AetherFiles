@@ -107,12 +107,16 @@ void on_paste_toolbar_clicked(GtkButton *btn, gpointer user_data) {
     (void)btn;
     if (!self->current_path) return;
     if (!aether_clipboard_has_content(self->clipboard)) return;
+    
+    if (self->progress_spinner) gtk_spinner_start(GTK_SPINNER(self->progress_spinner));
     aether_clipboard_paste(self->clipboard, self->current_path,
         on_paste_done, self);
 }
 
 void on_paste_done(GObject *src, GAsyncResult *res, gpointer ud) {
     AetherWindow *w = AETHER_WINDOW(ud);
+    if (w->progress_spinner) gtk_spinner_stop(GTK_SPINNER(w->progress_spinner));
+    
     GError *err = NULL;
     aether_clipboard_paste_finish(w->clipboard, res, &err);
     if (err) { g_printerr("Paste error: %s\n", err->message); g_error_free(err); }
@@ -205,33 +209,25 @@ gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
     GdkFileList *file_list = g_value_get_boxed(val);
     if (!file_list || !w->current_path) return FALSE;
     
+    GdkDrop *drop = gtk_drop_target_get_current_drop(t);
+    GdkDragAction action = drop ? gdk_drop_get_actions(drop) : GDK_ACTION_MOVE;
+    AetherClipboardOp op = (action & GDK_ACTION_COPY) ? AETHER_CLIPBOARD_COPY : AETHER_CLIPBOARD_CUT;
+    
     GSList *files = gdk_file_list_get_files(file_list);
-    gboolean success = FALSE;
+    guint n_files = g_slist_length(files);
+    GStrv paths = g_new0(char *, n_files + 1);
+    
+    guint i = 0;
     for (GSList *l = files; l != NULL; l = l->next) {
         GFile *src_file = G_FILE(l->data);
-        char *src_path  = g_file_get_path(src_file);
-        if (!src_path) continue;
-        
-        char *basename  = g_path_get_basename(src_path);
-        char *dest_path = g_build_filename(w->current_path, basename, NULL);
-        GFile *dest = g_file_new_for_path(dest_path);
-        
-        GError *err = NULL;
-        if (g_file_move(src_file, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &err)) {
-            success = TRUE;
-        } else {
-            g_printerr("DnD error: %s\n", err->message);
-            g_error_free(err);
-        }
-        g_free(src_path);
-        g_free(basename);
-        g_free(dest_path);
-        g_object_unref(dest);
+        paths[i++] = g_file_get_path(src_file);
     }
     
-    if (success) {
-        aether_window_reload(w);
-    }
+    aether_clipboard_set(w->clipboard, paths, op);
+    g_strfreev(paths);
+    
+    if (w->progress_spinner) gtk_spinner_start(GTK_SPINNER(w->progress_spinner));
+    aether_clipboard_paste(w->clipboard, w->current_path, on_paste_done, w);
     
     return TRUE;
 }

@@ -51,6 +51,8 @@ struct _AetherWindow {
     int     sort_mode;
     gboolean sort_asc;
     GtkWidget *sort_btn;
+    GtkWidget *progress_spinner;
+    GtkWidget *btn_hidden;
 
     GFileMonitor *dir_monitor;
 

@@ -66,10 +66,13 @@ static void on_copy_action(GSimpleAction *action, GVariant *parameter, gpointer 
 static void on_paste_done(GObject *src, GAsyncResult *res, gpointer ud) {
     (void)src;
     AetherApplication *app = AETHER_APPLICATION(ud);
+    AetherWindow *w = get_active_win(G_APPLICATION(app));
+    if (w) aether_window_stop_progress(w);
+
     GError *err = NULL;
     aether_clipboard_paste_finish(app->clipboard, res, &err);
     if (err) { g_printerr("Paste error: %s\n", err->message); g_error_free(err); }
-    AetherWindow *w = get_active_win(G_APPLICATION(app));
+    
     if (w) aether_window_reload(w);
 }
 
@@ -80,6 +83,8 @@ static void on_paste_action(GSimpleAction *action, GVariant *parameter, gpointer
     if (!win || !aether_clipboard_has_content(app->clipboard)) return;
     const char *dest = aether_window_get_current_path(win);
     if (!dest) return;
+    
+    aether_window_start_progress(win);
     aether_clipboard_paste(app->clipboard, dest, on_paste_done, app);
 }
 

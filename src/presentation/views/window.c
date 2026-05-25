@@ -52,6 +52,12 @@ static void aether_window_class_init(AetherWindowClass *klass) {
     oc->dispose = aether_window_dispose;
 }
 
+static void on_hidden_toggled(GtkToggleButton *btn, gpointer user_data) {
+    AetherWindow *self = AETHER_WINDOW(user_data);
+    self->show_hidden = gtk_toggle_button_get_active(btn);
+    if (self->current_path) load_directory(self, self->current_path);
+}
+
 
 
 static void aether_window_init(AetherWindow *self) {
@@ -87,10 +93,56 @@ static void aether_window_init(AetherWindow *self) {
     gtk_widget_add_css_class(sidebar_box, "aether-sidebar");
 
     GtkWidget *sidebar_header = gtk_header_bar_new();
-    GtkWidget *title_label = gtk_label_new("Files");
-    gtk_widget_add_css_class(title_label, "title");
-    gtk_header_bar_set_title_widget(GTK_HEADER_BAR(sidebar_header), title_label);
     gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(sidebar_header), FALSE);
+
+    GtkWidget *sidebar_icons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_set_halign(sidebar_icons, GTK_ALIGN_CENTER);
+
+    /* 1. More actions */
+    GtkWidget *more_btn = gtk_menu_button_new();
+    gtk_button_set_icon_name(GTK_BUTTON(more_btn), "view-more-symbolic");
+    gtk_widget_add_css_class(more_btn, "flat");
+
+    /* 2. Sort */
+    GtkWidget *sort_popover = gtk_popover_new();
+    GtkWidget *sort_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_margin_start(sort_box, 12);
+    gtk_widget_set_margin_end(sort_box, 12);
+    gtk_widget_set_margin_top(sort_box, 12);
+    gtk_widget_set_margin_bottom(sort_box, 12);
+
+    const char *sort_opts[] = {"Name", "Size", "Type", "Date Modified", NULL};
+    GtkWidget *dropdown = gtk_drop_down_new_from_strings(sort_opts);
+    g_signal_connect(dropdown, "notify::selected", G_CALLBACK(on_sort_mode_changed), self);
+    GtkWidget *dir_btn = gtk_button_new_with_label("Reverse Order");
+    g_signal_connect(dir_btn, "clicked", G_CALLBACK(on_sort_dir_clicked), self);
+
+    gtk_box_append(GTK_BOX(sort_box), dropdown);
+    gtk_box_append(GTK_BOX(sort_box), dir_btn);
+    gtk_popover_set_child(GTK_POPOVER(sort_popover), sort_box);
+
+    self->sort_btn = gtk_menu_button_new();
+    gtk_button_set_icon_name(GTK_BUTTON(self->sort_btn), self->sort_asc ? "view-sort-ascending-symbolic" : "view-sort-descending-symbolic");
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->sort_btn), sort_popover);
+    gtk_widget_add_css_class(self->sort_btn, "flat");
+
+    /* 3. Show hidden files */
+    self->btn_hidden = gtk_toggle_button_new();
+    gtk_button_set_icon_name(GTK_BUTTON(self->btn_hidden), "view-reveal-symbolic");
+    gtk_widget_add_css_class(self->btn_hidden, "flat");
+    g_signal_connect(self->btn_hidden, "toggled", G_CALLBACK(on_hidden_toggled), self);
+
+    /* 4. Circular Progress Indicator */
+    self->progress_spinner = gtk_spinner_new();
+    gtk_widget_set_margin_start(self->progress_spinner, 4);
+    gtk_widget_set_margin_end(self->progress_spinner, 4);
+
+    gtk_box_append(GTK_BOX(sidebar_icons), more_btn);
+    gtk_box_append(GTK_BOX(sidebar_icons), self->sort_btn);
+    gtk_box_append(GTK_BOX(sidebar_icons), self->btn_hidden);
+    gtk_box_append(GTK_BOX(sidebar_icons), self->progress_spinner);
+
+    gtk_header_bar_set_title_widget(GTK_HEADER_BAR(sidebar_header), sidebar_icons);
 
     GtkWidget *sidebar_scrolled = gtk_scrolled_window_new();
     gtk_widget_set_vexpand(sidebar_scrolled, TRUE);
@@ -224,9 +276,7 @@ static void aether_window_init(AetherWindow *self) {
     gtk_box_append(GTK_BOX(view_box), search_btn);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(content_header), view_box);
 
-    self->sort_btn = NULL;
-
-    /* ══ Status bar ══ */
+    /* Remove self->sort_btn assignment here since we already created it */    /* ══ Status bar ══ */
     GtkWidget *statusbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(statusbar, "aether-statusbar");
     self->status_label = gtk_label_new("0 items");
@@ -400,6 +450,14 @@ GStrv aether_window_get_selected_paths(AetherWindow *self) {
 
     g_ptr_array_add(paths, NULL);
     return (GStrv) g_ptr_array_free(paths, FALSE);
+}
+
+void aether_window_start_progress(AetherWindow *self) {
+    if (self->progress_spinner) gtk_spinner_start(GTK_SPINNER(self->progress_spinner));
+}
+
+void aether_window_stop_progress(AetherWindow *self) {
+    if (self->progress_spinner) gtk_spinner_stop(GTK_SPINNER(self->progress_spinner));
 }
 
 
