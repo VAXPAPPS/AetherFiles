@@ -5,11 +5,11 @@
 #include <string.h>
 
 struct _AetherApplication {
-    AdwApplication parent_instance;
+    GtkApplication parent_instance;
     AetherClipboardController *clipboard;
 };
 
-G_DEFINE_TYPE(AetherApplication, aether_application, ADW_TYPE_APPLICATION)
+G_DEFINE_TYPE(AetherApplication, aether_application, GTK_TYPE_APPLICATION)
 
 static AetherWindow *get_active_win(GApplication *app) {
     GtkWindow *w = gtk_application_get_active_window(GTK_APPLICATION(app));
@@ -26,8 +26,7 @@ static void aether_application_activate(GApplication *app) {
 
 static void aether_application_startup(GApplication *app) {
     G_APPLICATION_CLASS(aether_application_parent_class)->startup(app);
-    adw_style_manager_set_color_scheme(adw_style_manager_get_default(),
-                                       ADW_COLOR_SCHEME_PREFER_DARK);
+    g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
 }
 
 /* ── open ── */
@@ -85,14 +84,20 @@ static void on_paste_action(GSimpleAction *action, GVariant *parameter, gpointer
 }
 
 /* ── rename ── */
-static void on_rename_response(AdwAlertDialog *d, const char *resp, gpointer ud) {
+static void on_rename_response(GtkDialog *d, int response_id, gpointer ud) {
     (void)ud;
-    if (g_strcmp0(resp, "rename") != 0) return;
+    if (response_id != GTK_RESPONSE_ACCEPT) {
+        gtk_window_destroy(GTK_WINDOW(d));
+        return;
+    }
     const char *src      = (const char *)g_object_get_data(G_OBJECT(d), "src-path");
     GtkWidget  *ent      = GTK_WIDGET(g_object_get_data(G_OBJECT(d), "entry"));
     AetherApplication *a = AETHER_APPLICATION(g_object_get_data(G_OBJECT(d), "app-ref"));
     const char *new_name = gtk_editable_get_text(GTK_EDITABLE(ent));
-    if (!new_name || new_name[0] == '\0') return;
+    if (!new_name || new_name[0] == '\0') {
+        gtk_window_destroy(GTK_WINDOW(d));
+        return;
+    }
     GFile  *file = g_file_new_for_path(src);
     GError *err  = NULL;
     GFile  *renamed = g_file_set_display_name(file, new_name, NULL, &err);
@@ -101,6 +106,7 @@ static void on_rename_response(AdwAlertDialog *d, const char *resp, gpointer ud)
     g_object_unref(file);
     AetherWindow *w = get_active_win(G_APPLICATION(a));
     if (w) aether_window_reload(w);
+    gtk_window_destroy(GTK_WINDOW(d));
 }
 
 static void on_rename_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
@@ -116,7 +122,15 @@ static void on_rename_action(GSimpleAction *action, GVariant *parameter, gpointe
     }
     const char *path = paths[0];
 
-    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Rename", NULL));
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(win),
+                                               GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                               GTK_MESSAGE_OTHER,
+                                               GTK_BUTTONS_NONE,
+                                               "Rename");
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_CANCEL);
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Rename", GTK_RESPONSE_ACCEPT);
+    gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
+
     GtkWidget *entry = gtk_entry_new();
     char *basename = g_path_get_basename(path);
     gtk_editable_set_text(GTK_EDITABLE(entry), basename);
@@ -125,19 +139,52 @@ static void on_rename_action(GSimpleAction *action, GVariant *parameter, gpointe
     gtk_editable_select_region(GTK_EDITABLE(entry), 0, sel_end);
     g_free(basename);
 
-    adw_alert_dialog_set_extra_child(dialog, entry);
-    adw_alert_dialog_add_responses(ADW_ALERT_DIALOG(dialog),
-                                   "cancel", "Cancel", "rename", "Rename", NULL);
-    adw_alert_dialog_set_response_appearance(ADW_ALERT_DIALOG(dialog),
-                                              "rename", ADW_RESPONSE_SUGGESTED);
-    adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(dialog), "rename");
+    GtkWidget *area = gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialog));
+    gtk_box_append(GTK_BOX(area), entry);
+
     g_object_set_data_full(G_OBJECT(dialog), "src-path", g_strdup(path), g_free);
     g_object_set_data(G_OBJECT(dialog), "entry",   entry);
     g_object_set_data(G_OBJECT(dialog), "app-ref", app);
     g_signal_connect(dialog, "response", G_CALLBACK(on_rename_response), NULL);
-    adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(win));
+    gtk_window_present(GTK_WINDOW(dialog));
     
     g_strfreev(paths);
+}
+
+static void on_rename_path_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    AetherApplication *app = AETHER_APPLICATION(user_data);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+    
+    const char *path = g_variant_get_string(parameter, NULL);
+    if (!path) return;
+
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(win),
+                                               GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                               GTK_MESSAGE_OTHER,
+                                               GTK_BUTTONS_NONE,
+                                               "Rename");
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_CANCEL);
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Rename", GTK_RESPONSE_ACCEPT);
+    gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
+
+    GtkWidget *entry = gtk_entry_new();
+    char *basename = g_path_get_basename(path);
+    gtk_editable_set_text(GTK_EDITABLE(entry), basename);
+    const char *dot = strrchr(basename, '.');
+    int sel_end = dot ? (int)(dot - basename) : -1;
+    gtk_editable_select_region(GTK_EDITABLE(entry), 0, sel_end);
+    g_free(basename);
+
+    GtkWidget *area = gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialog));
+    gtk_box_append(GTK_BOX(area), entry);
+
+    g_object_set_data_full(G_OBJECT(dialog), "src-path", g_strdup(path), g_free);
+    g_object_set_data(G_OBJECT(dialog), "entry",   entry);
+    g_object_set_data(G_OBJECT(dialog), "app-ref", app);
+    g_signal_connect(dialog, "response", G_CALLBACK(on_rename_response), NULL);
+    gtk_window_present(GTK_WINDOW(dialog));
 }
 
 /* ── trash ── */
@@ -161,6 +208,11 @@ static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer
 }
 
 /* ── properties ── */
+static void on_properties_response(GtkDialog *d, int response_id, gpointer ud) {
+    (void)response_id; (void)ud;
+    gtk_window_destroy(GTK_WINDOW(d));
+}
+
 static void add_prop_row(GtkGrid *grid, int row, const char *key, const char *val) {
     GtkWidget *k = gtk_label_new(key);
     GtkWidget *v = gtk_label_new(val);
@@ -189,8 +241,11 @@ static void on_properties_action(GSimpleAction *action, GVariant *parameter, gpo
     if (err) { g_error_free(err); err = NULL; }
     g_object_unref(file);
 
-    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Properties", NULL));
-    adw_alert_dialog_add_responses(ADW_ALERT_DIALOG(dialog), "ok", "OK", NULL);
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(win),
+                                               GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                               GTK_MESSAGE_OTHER,
+                                               GTK_BUTTONS_OK,
+                                               "Properties");
 
     GtkWidget *grid = gtk_grid_new();
     gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
@@ -228,8 +283,10 @@ static void on_properties_action(GSimpleAction *action, GVariant *parameter, gpo
         g_object_unref(info);
     }
 
-    adw_alert_dialog_set_extra_child(dialog, grid);
-    adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(win));
+    GtkWidget *area = gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialog));
+    gtk_box_append(GTK_BOX(area), grid);
+    g_signal_connect(dialog, "response", G_CALLBACK(on_properties_response), NULL);
+    gtk_window_present(GTK_WINDOW(dialog));
 }
 
 /* ── set_background ── */
@@ -265,6 +322,7 @@ static void aether_application_init(AetherApplication *app) {
         { "copy",           G_CALLBACK(on_copy_action),           NULL },
         { "paste",          G_CALLBACK(on_paste_action),          NULL },
         { "rename",         G_CALLBACK(on_rename_action),         NULL },
+        { "rename-path",    G_CALLBACK(on_rename_path_action),    G_VARIANT_TYPE_STRING },
         { "trash",          G_CALLBACK(on_trash_action),          NULL },
         { "properties",     G_CALLBACK(on_properties_action),     G_VARIANT_TYPE_STRING },
         { "set_background", G_CALLBACK(on_set_background_action), G_VARIANT_TYPE_STRING },

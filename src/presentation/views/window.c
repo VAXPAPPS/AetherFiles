@@ -7,7 +7,7 @@
 #define HISTORY_MAX 50
 
 struct _AetherWindow {
-    AdwApplicationWindow    parent_instance;
+    GtkApplicationWindow    parent_instance;
     AetherFileRepository   *repo;
     AetherClipboardController *clipboard;
 
@@ -57,8 +57,7 @@ struct _AetherWindow {
     int bookmark_row_start;
 
     /* Tabs */
-    GtkWidget  *tab_view;   /* AdwTabView */
-    GtkWidget  *tab_bar;    /* AdwTabBar  */
+    GtkWidget  *tab_view;   /* GtkNotebook */
     GArray     *tabs;       /* array of AetherTabSession */
 
     /* Undo/Redo */
@@ -92,7 +91,7 @@ static void undo_entry_free(gpointer p) {
     g_free(e);
 }
 
-G_DEFINE_TYPE(AetherWindow, aether_window, ADW_TYPE_APPLICATION_WINDOW)
+G_DEFINE_TYPE(AetherWindow, aether_window, GTK_TYPE_APPLICATION_WINDOW)
 
 static void load_directory(AetherWindow *self, const char *path);
 static void update_nav_buttons(AetherWindow *self);
@@ -137,6 +136,23 @@ static void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     const char *path = aether_file_entity_get_path(entity);
     GVariant   *pv   = g_variant_new_string(path);
 
+    if (!gtk_list_item_get_selected(list_item)) {
+        GtkWidget *parent_view = gtk_widget_get_ancestor(box, GTK_TYPE_GRID_VIEW);
+        if (!parent_view)
+            parent_view = gtk_widget_get_ancestor(box, GTK_TYPE_COLUMN_VIEW);
+        if (parent_view) {
+            GtkSelectionModel *sel = NULL;
+            if (GTK_IS_GRID_VIEW(parent_view))
+                sel = gtk_grid_view_get_model(GTK_GRID_VIEW(parent_view));
+            else if (GTK_IS_COLUMN_VIEW(parent_view))
+                sel = gtk_column_view_get_model(GTK_COLUMN_VIEW(parent_view));
+            if (sel) {
+                guint pos = gtk_list_item_get_position(list_item);
+                gtk_selection_model_select_item(sel, pos, TRUE);
+            }
+        }
+    }
+
     GMenu *menu = g_menu_new();
 
     /* Open */
@@ -162,7 +178,7 @@ static void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     /* Manage */
     GMenu *s3 = g_menu_new();
     mi = g_menu_item_new("Rename…", NULL);
-    g_menu_item_set_action_and_target_value(mi, "app.rename", NULL);
+    g_menu_item_set_action_and_target_value(mi, "app.rename-path", pv);
     g_menu_append_item(s3, mi); g_object_unref(mi);
 
     if (!aether_file_entity_is_directory(entity)) {
@@ -189,15 +205,13 @@ static void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     g_menu_append_section(menu, NULL, G_MENU_MODEL(s4)); g_object_unref(s4);
 
     GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
-    GtkWidget *parent_view = gtk_widget_get_ancestor(box, GTK_TYPE_GRID_VIEW);
-    if (!parent_view)
-        parent_view = gtk_widget_get_ancestor(box, GTK_TYPE_COLUMN_VIEW);
+    GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(box));
 
-    if (parent_view) {
-        gtk_widget_set_parent(popover, parent_view);
+    if (root) {
+        gtk_widget_set_parent(popover, root);
         g_signal_connect(popover, "closed", G_CALLBACK(on_popover_closed), NULL);
         double xv = 0, yv = 0;
-        gtk_widget_translate_coordinates(box, parent_view, x, y, &xv, &yv);
+        gtk_widget_translate_coordinates(box, root, x, y, &xv, &yv);
         GdkRectangle rect = { (int)xv, (int)yv, 1, 1 };
         gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
         gtk_popover_popup(GTK_POPOVER(popover));
@@ -705,13 +719,19 @@ static void setup_sidebar(AetherWindow *self) {
 }
 
 /* ── Toolbar action callbacks ── */
-static void on_new_folder_response(AdwAlertDialog *d, const char *response, gpointer ud) {
+static void on_new_folder_response(GtkDialog *d, int response_id, gpointer ud) {
     (void)ud;
-    if (g_strcmp0(response, "create") != 0) return;
+    if (response_id != GTK_RESPONSE_ACCEPT) {
+        gtk_window_destroy(GTK_WINDOW(d));
+        return;
+    }
     AetherWindow *w   = AETHER_WINDOW(g_object_get_data(G_OBJECT(d), "window"));
     GtkWidget    *ent = GTK_WIDGET(g_object_get_data(G_OBJECT(d), "entry"));
     const char   *nm  = gtk_editable_get_text(GTK_EDITABLE(ent));
-    if (!nm || nm[0] == '\0') return;
+    if (!nm || nm[0] == '\0') {
+        gtk_window_destroy(GTK_WINDOW(d));
+        return;
+    }
     char  *full = g_build_filename(w->current_path, nm, NULL);
     GFile *dir  = g_file_new_for_path(full);
     GError *err = NULL;
@@ -720,28 +740,29 @@ static void on_new_folder_response(AdwAlertDialog *d, const char *response, gpoi
     else      { load_directory(w, w->current_path); }
     g_free(full);
     g_object_unref(dir);
+    gtk_window_destroy(GTK_WINDOW(d));
 }
 
 static void on_new_folder_clicked(GtkButton *btn, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
     if (!self->current_path) return;
 
-    AdwDialog *dialog = ADW_DIALOG(adw_alert_dialog_new("New Folder", NULL));
-    adw_alert_dialog_set_body(ADW_ALERT_DIALOG(dialog), "Enter a name for the new folder:");
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(self),
+                                               GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                               GTK_MESSAGE_OTHER,
+                                               GTK_BUTTONS_NONE,
+                                               "Enter a name for the new folder:");
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_CANCEL);
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Create", GTK_RESPONSE_ACCEPT);
+    gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
 
     GtkWidget *entry = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Folder name");
     gtk_editable_set_text(GTK_EDITABLE(entry), "New Folder");
     gtk_editable_select_region(GTK_EDITABLE(entry), 0, -1);
-    adw_alert_dialog_set_extra_child(ADW_ALERT_DIALOG(dialog), entry);
-    adw_alert_dialog_add_responses(ADW_ALERT_DIALOG(dialog),
-                                   "cancel", "Cancel",
-                                   "create", "Create",
-                                   NULL);
-    adw_alert_dialog_set_response_appearance(ADW_ALERT_DIALOG(dialog),
-                                              "create", ADW_RESPONSE_SUGGESTED);
-    adw_alert_dialog_set_default_response(ADW_ALERT_DIALOG(dialog), "create");
-    adw_alert_dialog_set_close_response(ADW_ALERT_DIALOG(dialog), "cancel");
+    
+    GtkWidget *area = gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialog));
+    gtk_box_append(GTK_BOX(area), entry);
 
     /* Store self + entry for the response handler */
     g_object_set_data(G_OBJECT(dialog), "window", self);
@@ -750,7 +771,7 @@ static void on_new_folder_clicked(GtkButton *btn, gpointer user_data) {
     g_signal_connect(dialog, "response",
         G_CALLBACK(on_new_folder_response), NULL);
 
-    adw_dialog_present(dialog, GTK_WIDGET(self));
+    gtk_window_present(GTK_WINDOW(dialog));
 }
 
 static void on_new_document_clicked(GtkButton *btn, gpointer user_data) {
@@ -903,9 +924,11 @@ static void on_sort_dir_clicked(GtkButton *btn, gpointer user_data) {
     (void)btn;
     AetherWindow *self = AETHER_WINDOW(user_data);
     self->sort_asc = !self->sort_asc;
-    gtk_button_set_icon_name(GTK_BUTTON(self->sort_btn),
-        self->sort_asc ? "view-sort-ascending-symbolic"
-                       : "view-sort-descending-symbolic");
+    if (self->sort_btn) {
+        gtk_button_set_icon_name(GTK_BUTTON(self->sort_btn),
+            self->sort_asc ? "view-sort-ascending-symbolic"
+                           : "view-sort-descending-symbolic");
+    }
     if (self->current_path)
         aether_file_repository_list_directory_async(
             self->repo, self->current_path, NULL, on_directory_loaded, self);
@@ -1077,21 +1100,20 @@ static void tab_session_restore(AetherWindow *self, int idx) {
 
 static int current_tab_index(AetherWindow *self) {
     if (!self->tab_view) return 0;
-    AdwTabPage *page = adw_tab_view_get_selected_page(ADW_TAB_VIEW(self->tab_view));
-    if (!page) return 0;
-    return adw_tab_view_get_page_position(ADW_TAB_VIEW(self->tab_view), page);
+    return gtk_notebook_get_current_page(GTK_NOTEBOOK(self->tab_view));
 }
 
-static void on_tab_selected(AdwTabView *view, GParamSpec *pspec, gpointer ud) {
-    (void)pspec;
+static void on_tab_selected(GtkNotebook *notebook, GtkWidget *page, guint page_num, gpointer ud) {
+    (void)notebook; (void)page;
     AetherWindow *self = AETHER_WINDOW(ud);
-    int idx = current_tab_index(self);
-    tab_session_restore(self, idx);
+    tab_session_restore(self, page_num);
     /* Update tab title */
-    AdwTabPage *page = adw_tab_view_get_selected_page(view);
-    if (page && self->current_path) {
+    if (self->current_path) {
         char *base = g_path_get_basename(self->current_path);
-        adw_tab_page_set_title(page, base);
+        GtkWidget *child = gtk_notebook_get_nth_page(notebook, page_num);
+        if (child) {
+            gtk_notebook_set_tab_label_text(notebook, child, base);
+        }
         g_free(base);
     }
 }
@@ -1107,11 +1129,11 @@ static void new_tab(AetherWindow *self, const char *path) {
     g_free(base);
     g_array_append_val(self->tabs, session);
 
-    /* Add tab page to AdwTabView */
+    /* Add tab page to GtkNotebook */
     GtkWidget *placeholder = gtk_label_new("");
-    AdwTabPage *page = adw_tab_view_append(ADW_TAB_VIEW(self->tab_view), placeholder);
-    adw_tab_page_set_title(page, session.title);
-    adw_tab_view_set_selected_page(ADW_TAB_VIEW(self->tab_view), page);
+    int idx = gtk_notebook_append_page(GTK_NOTEBOOK(self->tab_view), placeholder, gtk_label_new(session.title));
+    gtk_notebook_set_tab_reorderable(GTK_NOTEBOOK(self->tab_view), placeholder, TRUE);
+    gtk_notebook_set_current_page(GTK_NOTEBOOK(self->tab_view), idx);
 }
 
 static void close_tab(AetherWindow *self, int idx) {
@@ -1120,8 +1142,7 @@ static void close_tab(AetherWindow *self, int idx) {
     tab_session_free_fields(s);
     g_array_remove_index(self->tabs, idx);
 
-    AdwTabPage *page = adw_tab_view_get_nth_page(ADW_TAB_VIEW(self->tab_view), idx);
-    if (page) adw_tab_view_close_page(ADW_TAB_VIEW(self->tab_view), page);
+    gtk_notebook_remove_page(GTK_NOTEBOOK(self->tab_view), idx);
 
     int new_idx = CLAMP(idx - 1, 0, (int)self->tabs->len - 1);
     tab_session_restore(self, new_idx);
@@ -1337,23 +1358,23 @@ static void aether_window_init(AetherWindow *self) {
     /* ══ Sidebar ══ */
     setup_sidebar(self);
 
-    GtkWidget *sidebar_toolbar = adw_toolbar_view_new();
-    gtk_widget_add_css_class(sidebar_toolbar, "aether-sidebar");
+    GtkWidget *sidebar_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class(sidebar_box, "aether-sidebar");
 
-    GtkWidget *sidebar_header = adw_header_bar_new();
+    GtkWidget *sidebar_header = gtk_header_bar_new();
     GtkWidget *title_label = gtk_label_new("Files");
     gtk_widget_add_css_class(title_label, "title");
-    adw_header_bar_set_title_widget(ADW_HEADER_BAR(sidebar_header), title_label);
-    adw_header_bar_set_show_end_title_buttons(ADW_HEADER_BAR(sidebar_header), FALSE);
-    adw_header_bar_set_show_start_title_buttons(ADW_HEADER_BAR(sidebar_header), FALSE);
+    gtk_header_bar_set_title_widget(GTK_HEADER_BAR(sidebar_header), title_label);
+    gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(sidebar_header), FALSE);
 
     GtkWidget *sidebar_scrolled = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(sidebar_scrolled, TRUE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sidebar_scrolled), self->sidebar_list);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sidebar_scrolled),
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
 
-    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(sidebar_toolbar), sidebar_header);
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(sidebar_toolbar), sidebar_scrolled);
+    gtk_box_append(GTK_BOX(sidebar_box), sidebar_header);
+    gtk_box_append(GTK_BOX(sidebar_box), sidebar_scrolled);
 
     /* ══ Views ══ */
     self->view_stack = gtk_stack_new();
@@ -1403,7 +1424,6 @@ static void aether_window_init(AetherWindow *self) {
     gtk_column_view_column_set_fixed_width(size_col, 90);
     gtk_column_view_append_column(GTK_COLUMN_VIEW(self->list_view), size_col);
     g_object_unref(size_col);
-    g_object_unref(sf);
 
     gtk_stack_add_named(GTK_STACK(self->view_stack), grid_scrolled, "grid");
     gtk_stack_add_named(GTK_STACK(self->view_stack), list_scrolled, "list");
@@ -1418,9 +1438,8 @@ static void aether_window_init(AetherWindow *self) {
     gtk_search_bar_set_show_close_button(GTK_SEARCH_BAR(self->search_bar), TRUE);
 
     /* ══ Content header ══ */
-    GtkWidget *content_header = adw_header_bar_new();
-    adw_header_bar_set_show_end_title_buttons(ADW_HEADER_BAR(content_header), TRUE);
-    adw_header_bar_set_show_start_title_buttons(ADW_HEADER_BAR(content_header), FALSE);
+    GtkWidget *content_header = gtk_header_bar_new();
+    gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(content_header), TRUE);
 
     /* Nav buttons */
     GtkWidget *nav_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
@@ -1434,13 +1453,13 @@ static void aether_window_init(AetherWindow *self) {
     g_signal_connect(self->btn_fwd,  "clicked", G_CALLBACK(on_btn_fwd_clicked),  self);
     gtk_box_append(GTK_BOX(nav_box), self->btn_back);
     gtk_box_append(GTK_BOX(nav_box), self->btn_fwd);
-    adw_header_bar_pack_start(ADW_HEADER_BAR(content_header), nav_box);
+    gtk_header_bar_pack_start(GTK_HEADER_BAR(content_header), nav_box);
 
     /* Path bar */
     self->path_bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(self->path_bar, "aether-pathbar");
     gtk_widget_set_hexpand(self->path_bar, TRUE);
-    adw_header_bar_set_title_widget(ADW_HEADER_BAR(content_header), self->path_bar);
+    gtk_header_bar_set_title_widget(GTK_HEADER_BAR(content_header), self->path_bar);
 
     /* View switcher */
     GtkWidget *view_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
@@ -1466,51 +1485,9 @@ static void aether_window_init(AetherWindow *self) {
     gtk_box_append(GTK_BOX(view_box), self->btn_list);
     gtk_box_append(GTK_BOX(view_box), self->btn_grid);
     gtk_box_append(GTK_BOX(view_box), search_btn);
-    adw_header_bar_pack_end(ADW_HEADER_BAR(content_header), view_box);
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(content_header), view_box);
 
-    /* ══ Action toolbar ══ */
-    GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_add_css_class(toolbar, "aether-toolbar");
-
-    struct { const char *icon; const char *label; GCallback cb; } tb_btns[] = {
-        { "folder-new-symbolic",         "New Folder",    G_CALLBACK(on_new_folder_clicked)    },
-        { "document-new-symbolic",       "New Document",  G_CALLBACK(on_new_document_clicked)  },
-        { "utilities-terminal-symbolic", "Open Terminal", G_CALLBACK(on_open_terminal_clicked) },
-        { "edit-paste-symbolic",         "Paste",         G_CALLBACK(on_paste_toolbar_clicked) },
-        { "edit-select-all-symbolic",    "Select All",    G_CALLBACK(on_select_all_clicked)    },
-    };
-
-    for (int i = 0; i < 5; i++) {
-        GtkWidget *b = gtk_button_new();
-        GtkWidget *inner = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-        GtkWidget *ic = gtk_image_new_from_icon_name(tb_btns[i].icon);
-        GtkWidget *lb = gtk_label_new(tb_btns[i].label);
-        gtk_box_append(GTK_BOX(inner), ic);
-        gtk_box_append(GTK_BOX(inner), lb);
-        gtk_button_set_child(GTK_BUTTON(b), inner);
-        g_signal_connect(b, "clicked", tb_btns[i].cb, self);
-        gtk_box_append(GTK_BOX(toolbar), b);
-    }
-
-    /* Sort controls on the right side of toolbar */
-    GtkWidget *sort_spacer = gtk_label_new("");
-    gtk_widget_set_hexpand(sort_spacer, TRUE);
-    gtk_box_append(GTK_BOX(toolbar), sort_spacer);
-
-    const char *sort_options[] = { "Name", "Size", "Type", NULL };
-    GtkStringList *sort_list = gtk_string_list_new(sort_options);
-    GtkWidget *sort_dropdown = gtk_drop_down_new(G_LIST_MODEL(sort_list), NULL);
-    gtk_widget_add_css_class(sort_dropdown, "sort-dropdown");
-    gtk_widget_set_tooltip_text(sort_dropdown, "Sort by");
-    g_signal_connect(sort_dropdown, "notify::selected",
-                     G_CALLBACK(on_sort_mode_changed), self);
-    gtk_box_append(GTK_BOX(toolbar), sort_dropdown);
-
-    self->sort_btn = gtk_button_new_from_icon_name("view-sort-ascending-symbolic");
-    gtk_widget_add_css_class(self->sort_btn, "flat");
-    gtk_widget_set_tooltip_text(self->sort_btn, "Toggle sort direction");
-    g_signal_connect(self->sort_btn, "clicked", G_CALLBACK(on_sort_dir_clicked), self);
-    gtk_box_append(GTK_BOX(toolbar), self->sort_btn);
+    self->sort_btn = NULL;
 
     /* ══ Status bar ══ */
     GtkWidget *statusbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -1523,39 +1500,36 @@ static void aether_window_init(AetherWindow *self) {
     gtk_box_append(GTK_BOX(statusbar), self->status_label);
     gtk_box_append(GTK_BOX(statusbar), self->space_label);
 
-    /* ══ AdwTabView + AdwTabBar ══ */
-    self->tab_view = adw_tab_view_new();
+    /* ══ GtkNotebook ══ */
+    self->tab_view = gtk_notebook_new();
+    gtk_notebook_set_scrollable(GTK_NOTEBOOK(self->tab_view), TRUE);
     gtk_widget_add_css_class(self->tab_view, "aether-tab-view");
     gtk_widget_set_vexpand(self->tab_view, FALSE);
     gtk_widget_set_hexpand(self->tab_view, TRUE);
-
-    self->tab_bar = adw_tab_bar_new();
-    adw_tab_bar_set_view(ADW_TAB_BAR(self->tab_bar), ADW_TAB_VIEW(self->tab_view));
-    gtk_widget_add_css_class(self->tab_bar, "aether-tab-bar");
-    g_signal_connect(self->tab_view, "notify::selected-page",
+    gtk_widget_set_visible(self->tab_view, FALSE); /* Hide the tab bar and its empty content area */
+    g_signal_connect(self->tab_view, "switch-page",
                      G_CALLBACK(on_tab_selected), self);
 
     /* ══ Content assembly ══ */
     GtkWidget *content_area = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append(GTK_BOX(content_area), self->tab_bar);
+    gtk_widget_set_vexpand(content_area, TRUE);
+    gtk_box_append(GTK_BOX(content_area), self->tab_view);
     gtk_box_append(GTK_BOX(content_area), self->search_bar);
-    gtk_box_append(GTK_BOX(content_area), toolbar);
     gtk_widget_set_vexpand(self->view_stack, TRUE);
     gtk_box_append(GTK_BOX(content_area), self->view_stack);
     gtk_box_append(GTK_BOX(content_area), statusbar);
 
-    GtkWidget *content_toolbar = adw_toolbar_view_new();
-    gtk_widget_add_css_class(content_toolbar, "aether-content");
-    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(content_toolbar), content_header);
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(content_toolbar), content_area);
+    GtkWidget *content_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class(content_box, "aether-content");
+    gtk_widget_set_hexpand(content_box, TRUE);
+    gtk_box_append(GTK_BOX(content_box), content_header);
+    gtk_box_append(GTK_BOX(content_box), content_area);
 
     /* ══ Split view ══ */
-    self->split_view = adw_overlay_split_view_new();
-    adw_overlay_split_view_set_sidebar(ADW_OVERLAY_SPLIT_VIEW(self->split_view), sidebar_toolbar);
-    adw_overlay_split_view_set_content(ADW_OVERLAY_SPLIT_VIEW(self->split_view), content_toolbar);
-    adw_overlay_split_view_set_max_sidebar_width(ADW_OVERLAY_SPLIT_VIEW(self->split_view), 240);
-    adw_overlay_split_view_set_min_sidebar_width(ADW_OVERLAY_SPLIT_VIEW(self->split_view), 200);
-    adw_overlay_split_view_set_sidebar_width_fraction(ADW_OVERLAY_SPLIT_VIEW(self->split_view), 0.22);
+    self->split_view = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_paned_set_start_child(GTK_PANED(self->split_view), sidebar_box);
+    gtk_paned_set_end_child(GTK_PANED(self->split_view), content_box);
+    gtk_paned_set_position(GTK_PANED(self->split_view), 240);
 
     /* Root background */
     GtkWidget *root_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -1564,7 +1538,7 @@ static void aether_window_init(AetherWindow *self) {
     gtk_widget_set_vexpand(root_box, TRUE);
     gtk_box_append(GTK_BOX(root_box), self->split_view);
 
-    adw_application_window_set_content(ADW_APPLICATION_WINDOW(self), root_box);
+    gtk_window_set_child(GTK_WINDOW(self), root_box);
 
     /* ══ Keyboard shortcuts via ShortcutController ══ */
     GtkShortcutController *sc = GTK_SHORTCUT_CONTROLLER(gtk_shortcut_controller_new());

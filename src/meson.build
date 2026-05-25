@@ -11,7 +11,7 @@ aetherfiles_sources = [
 executable('aetherfiles',
   aetherfiles_sources,
   aetherfiles_resources,
-  dependencies: [gtk_dep, adw_dep, gio_dep, gio_unix_dep],
+  dependencies: [gtk_dep, gio_dep, gio_unix_dep],
   include_directories: inc,
   install: true
 )

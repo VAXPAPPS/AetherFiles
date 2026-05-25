@@ -13,7 +13,7 @@ typedef struct _AetherClipboardController AetherClipboardController;
 AetherClipboardController *aether_clipboard_controller_new     (void);
 void                       aether_clipboard_controller_free    (AetherClipboardController *self);
 
-void     aether_clipboard_set           (AetherClipboardController *self, const char *path, AetherClipboardOp op);
+void     aether_clipboard_set           (AetherClipboardController *self, GStrv paths, AetherClipboardOp op);
 void     aether_clipboard_paste         (AetherClipboardController *self, const char *dest_dir, GAsyncReadyCallback cb, gpointer user_data);
 void     aether_clipboard_paste_finish  (AetherClipboardController *self, GAsyncResult *res, GError **error);
 gboolean aether_clipboard_has_content   (AetherClipboardController *self);
