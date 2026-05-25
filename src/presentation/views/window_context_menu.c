@@ -22,6 +22,7 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     AetherFileEntity *entity = AETHER_FILE_ENTITY(item);
     GtkWidget *box = gtk_list_item_get_child(list_item);
     const char *path = aether_file_entity_get_path(entity);
+    if (!path) path = aether_file_entity_get_uri(entity);
 
     if (!gtk_list_item_get_selected(list_item)) {
         GtkWidget *parent_view = gtk_widget_get_ancestor(box, GTK_TYPE_GRID_VIEW);

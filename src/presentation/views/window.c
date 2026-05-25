@@ -378,6 +378,7 @@ GStrv aether_window_get_selected_paths(AetherWindow *self) {
             if (item) {
                 if (AETHER_IS_FILE_ENTITY(item)) {
                     const char *path = aether_file_entity_get_path(AETHER_FILE_ENTITY(item));
+                    if (!path) path = aether_file_entity_get_uri(AETHER_FILE_ENTITY(item));
                     if (path) g_ptr_array_add(paths, g_strdup(path));
                 }
                 g_object_unref(item);

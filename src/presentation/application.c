@@ -98,7 +98,7 @@ static void on_rename_response(GtkDialog *d, int response_id, gpointer ud) {
         gtk_window_destroy(GTK_WINDOW(d));
         return;
     }
-    GFile  *file = g_file_new_for_path(src);
+    GFile  *file = g_file_parse_name(src);
     GError *err  = NULL;
     GFile  *renamed = g_file_set_display_name(file, new_name, NULL, &err);
     if (err) { g_printerr("Rename error: %s\n", err->message); g_error_free(err); }
@@ -200,7 +200,7 @@ static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer
     if (!paths) return;
     
     for (int i = 0; paths[i]; i++) {
-        GFile  *file = g_file_new_for_path(paths[i]);
+        GFile  *file = g_file_parse_name(paths[i]);
         GError *err  = NULL;
         g_file_trash(file, NULL, &err);
         if (err) { g_printerr("Trash error: %s\n", err->message); g_error_free(err); }
@@ -339,7 +339,7 @@ static void on_properties_action(GSimpleAction *action, GVariant *parameter, gpo
     if (!win) return;
     const char *path = g_variant_get_string(parameter, NULL);
 
-    GFile  *file = g_file_new_for_path(path);
+    GFile  *file = g_file_parse_name(path);
     GError *err  = NULL;
     GFileInfo *info = g_file_query_info(file,
         G_FILE_ATTRIBUTE_STANDARD_SIZE ","
