@@ -86,7 +86,7 @@ static void on_enumerate_children_ready(GObject *source_object, GAsyncResult *re
 static void gio_list_directory_async(AetherFileRepository *repo, const char *path, GCancellable *cancellable, GAsyncReadyCallback callback, gpointer user_data) {
     GTask *task = g_task_new(repo, cancellable, callback, user_data);
     
-    GFile *file = g_file_new_for_path(path);
+    GFile *file = g_file_parse_name(path);
     
     ListDirData *data = g_new0(ListDirData, 1);
     data->task = task;

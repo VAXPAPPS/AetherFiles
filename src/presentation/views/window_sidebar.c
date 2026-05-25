@@ -150,7 +150,7 @@ void setup_sidebar(AetherWindow *self) {
                       g_get_user_special_dir(G_USER_DIRECTORY_PICTURES));
     add_sidebar_place(self, "Videos",    "folder-videos-symbolic",
                       g_get_user_special_dir(G_USER_DIRECTORY_VIDEOS));
-    add_sidebar_place(self, "Trash",     "user-trash-symbolic",           "/tmp");
+    add_sidebar_place(self, "Trash",     "user-trash-symbolic",           "trash:///");
 
     add_sidebar_separator(self);
 

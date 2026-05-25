@@ -28,7 +28,7 @@ void update_statusbar(AetherWindow *self) {
     gtk_label_set_text(GTK_LABEL(self->status_label), text);
     g_free(text);
 
-    GFile    *f     = g_file_new_for_path(self->current_path ? self->current_path : "/");
+    GFile    *f     = g_file_parse_name(self->current_path ? self->current_path : "/");
     GFileInfo *info = g_file_query_filesystem_info(f,
                           G_FILE_ATTRIBUTE_FILESYSTEM_FREE,
                           NULL, NULL);
@@ -135,7 +135,7 @@ void setup_file_monitor(AetherWindow *self, const char *path) {
         g_clear_object(&self->dir_monitor);
     }
     if (!path) return;
-    GFile *dir = g_file_new_for_path(path);
+    GFile *dir = g_file_parse_name(path);
     GError *err = NULL;
     self->dir_monitor = g_file_monitor_directory(dir,
                             G_FILE_MONITOR_WATCH_MOVES, NULL, &err);

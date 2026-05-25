@@ -35,6 +35,11 @@ void setup_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     g_signal_connect(source, "prepare", G_CALLBACK(on_drag_prepare), li);
     gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(source));
 
+    GtkDropTarget *item_drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+    g_signal_connect(item_drop, "accept", G_CALLBACK(on_item_drop_accept), li);
+    g_signal_connect(item_drop, "drop", G_CALLBACK(on_item_drop), li);
+    gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(item_drop));
+
     gtk_list_item_set_child(li, box);
 }
 
@@ -85,6 +90,11 @@ void setup_list_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     gtk_drag_source_set_actions(source, GDK_ACTION_COPY | GDK_ACTION_MOVE);
     g_signal_connect(source, "prepare", G_CALLBACK(on_drag_prepare), li);
     gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(source));
+
+    GtkDropTarget *item_drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+    g_signal_connect(item_drop, "accept", G_CALLBACK(on_item_drop_accept), li);
+    g_signal_connect(item_drop, "drop", G_CALLBACK(on_item_drop), li);
+    gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(item_drop));
 
     gtk_list_item_set_child(li, box);
 }

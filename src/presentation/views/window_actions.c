@@ -271,6 +271,62 @@ GdkContentProvider *on_drag_prepare(GtkDragSource *source, double x, double y,
     return provider;
 }
 
+gboolean on_item_drop_accept(GtkDropTarget *target, GdkDrop *drop, gpointer user_data) {
+    (void)target; (void)drop;
+    GtkListItem *list_item = GTK_LIST_ITEM(user_data);
+    gpointer item = gtk_list_item_get_item(list_item);
+    if (!item || !AETHER_IS_FILE_ENTITY(item)) return FALSE;
+    
+    AetherFileEntity *entity = AETHER_FILE_ENTITY(item);
+    return aether_file_entity_is_directory(entity);
+}
+
+gboolean on_item_drop(GtkDropTarget *target, const GValue *value, double x, double y, gpointer user_data) {
+    (void)target; (void)x; (void)y;
+    GtkListItem *list_item = GTK_LIST_ITEM(user_data);
+    gpointer item = gtk_list_item_get_item(list_item);
+    if (!item || !AETHER_IS_FILE_ENTITY(item)) return FALSE;
+    
+    AetherFileEntity *entity = AETHER_FILE_ENTITY(item);
+    if (!aether_file_entity_is_directory(entity)) return FALSE;
+    
+    const char *dest_path = aether_file_entity_get_path(entity);
+    if (!dest_path) return FALSE;
+    
+    GdkFileList *file_list = g_value_get_boxed(value);
+    if (!file_list) return FALSE;
+    
+    GSList *files = gdk_file_list_get_files(file_list);
+    GFile *dest_dir = g_file_new_for_path(dest_path);
+    gboolean success = TRUE;
+    
+    for (GSList *l = files; l != NULL; l = l->next) {
+        GFile *src = G_FILE(l->data);
+        char *basename = g_file_get_basename(src);
+        GFile *dest_file = g_file_get_child(dest_dir, basename);
+        GError *err = NULL;
+        
+        g_file_move(src, dest_file, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+        if (err) {
+            g_printerr("DnD error: Error moving file %s: %s\n", dest_path, err->message);
+            g_error_free(err);
+            success = FALSE;
+        }
+        g_object_unref(dest_file);
+        g_free(basename);
+    }
+    g_object_unref(dest_dir);
+    g_slist_free_full(files, g_object_unref);
+    
+    GtkWidget *box = gtk_list_item_get_child(list_item);
+    GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(box));
+    if (root && AETHER_IS_WINDOW(root)) {
+        aether_window_reload(AETHER_WINDOW(root));
+    }
+    
+    return success;
+}
+
 gboolean on_undo_shortcut(GtkWidget *w, GVariant *a, gpointer ud) {
     (void)w; (void)a;
     do_undo(AETHER_WINDOW(ud));
