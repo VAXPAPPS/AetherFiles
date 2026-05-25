@@ -49,37 +49,50 @@ void update_pathbar(AetherWindow *self) {
     while ((child = gtk_widget_get_first_child(self->path_bar)) != NULL)
         gtk_box_remove(GTK_BOX(self->path_bar), child);
 
-    char **segs = g_strsplit(self->current_path, "/", -1);
-    char  *accum = g_strdup("");
+    if (!self->current_path) return;
 
-    for (int i = 0; segs[i] != NULL; i++) {
-        if (strlen(segs[i]) == 0 && i == 0) continue;
-
-        char *new_path;
-        if (strlen(accum) == 0)
-            new_path = g_strdup_printf("/%s", segs[i]);
-        else
-            new_path = g_build_filename(accum, segs[i], NULL);
-        g_free(accum);
-        accum = new_path;
-
-        const char *label = (strlen(segs[i]) == 0) ? "Root" : segs[i];
-        GtkWidget  *btn   = gtk_button_new_with_label(label);
+    GFile *f = g_file_parse_name(self->current_path);
+    GPtrArray *parents = g_ptr_array_new_with_free_func(g_object_unref);
+    
+    GFile *parent = g_object_ref(f);
+    while (parent != NULL) {
+        g_ptr_array_add(parents, parent);
+        parent = g_file_get_parent(parent);
+    }
+    
+    for (int i = parents->len - 1; i >= 0; i--) {
+        GFile *curr = G_FILE(g_ptr_array_index(parents, i));
+        char *name = g_file_get_basename(curr);
+        char *path = g_file_get_parse_name(curr);
+        char *uri = g_file_get_uri(curr);
+        
+        const char *label = name;
+        if (!label || strlen(label) == 0 || g_strcmp0(label, "/") == 0) {
+            if (g_str_has_prefix(uri, "trash:")) label = "Trash";
+            else label = "Root";
+        }
+        
+        GtkWidget *btn = gtk_button_new_with_label(label);
         gtk_widget_add_css_class(btn, "flat");
-        g_object_set_data_full(G_OBJECT(btn), "path", g_strdup(accum), g_free);
+        g_object_set_data_full(G_OBJECT(btn), "path", g_strdup(path), g_free);
         g_signal_connect(btn, "clicked", G_CALLBACK(on_path_button_clicked), self);
         gtk_box_append(GTK_BOX(self->path_bar), btn);
-
-        if (segs[i+1] && strlen(segs[i+1]) > 0) {
+        
+        if (i > 0) {
             GtkWidget *sep = gtk_label_new("›");
             gtk_widget_add_css_class(sep, "path-sep");
             gtk_widget_set_margin_start(sep, 2);
             gtk_widget_set_margin_end(sep, 2);
             gtk_box_append(GTK_BOX(self->path_bar), sep);
         }
+        
+        g_free(name);
+        g_free(path);
+        g_free(uri);
     }
-    g_free(accum);
-    g_strfreev(segs);
+    
+    g_ptr_array_free(parents, TRUE);
+    g_object_unref(f);
 }
 
 void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data) {
@@ -104,6 +117,7 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
         g_object_unref(e);
         self->item_count++;
     }
+    g_printerr("Loaded %u items, %u visible\n", n, self->item_count);
     g_object_unref(raw);
 
     /* Sort with self context so sort_mode/sort_asc are used */

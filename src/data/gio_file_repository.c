@@ -23,19 +23,30 @@ AetherGioFileRepository *aether_gio_file_repository_new(void) {
 typedef struct {
     GTask *task;
     GListStore *store;
+    GFileEnumerator *enumerator;
 } ListDirData;
 
 static void list_dir_data_free(ListDirData *data) {
     g_object_unref(data->task);
     g_object_unref(data->store);
+    if (data->enumerator) g_object_unref(data->enumerator);
     g_free(data);
 }
 
-static void on_enumerate_children_ready(GObject *source_object, GAsyncResult *res, gpointer user_data) {
-    GFile *file = G_FILE(source_object);
+static void on_next_files_ready(GObject *source_object, GAsyncResult *res, gpointer user_data);
+
+static void fetch_next_files(ListDirData *data) {
+    g_file_enumerator_next_files_async(data->enumerator,
+                                       100, /* num files */
+                                       G_PRIORITY_DEFAULT,
+                                       g_task_get_cancellable(data->task),
+                                       on_next_files_ready,
+                                       data);
+}
+
+static void on_next_files_ready(GObject *source_object, GAsyncResult *res, gpointer user_data) {
     GError *error = NULL;
-    GFileEnumerator *enumerator = g_file_enumerate_children_finish(file, res, &error);
-    
+    GList *files = g_file_enumerator_next_files_finish(G_FILE_ENUMERATOR(source_object), res, &error);
     ListDirData *data = user_data;
     
     if (error) {
@@ -44,9 +55,15 @@ static void on_enumerate_children_ready(GObject *source_object, GAsyncResult *re
         return;
     }
     
-    while (TRUE) {
-        GFileInfo *info = g_file_enumerator_next_file(enumerator, NULL, NULL);
-        if (!info) break;
+    if (!files) {
+        /* We are done */
+        g_task_return_pointer(data->task, g_object_ref(data->store), g_object_unref);
+        list_dir_data_free(data);
+        return;
+    }
+    
+    for (GList *l = files; l != NULL; l = l->next) {
+        GFileInfo *info = G_FILE_INFO(l->data);
         
         const char *name = g_file_info_get_name(info);
         gboolean is_dir = g_file_info_get_file_type(info) == G_FILE_TYPE_DIRECTORY;
@@ -63,7 +80,7 @@ static void on_enumerate_children_ready(GObject *source_object, GAsyncResult *re
             icon_name = is_dir ? "folder" : "text-x-generic";
         }
         
-        GFile *child = g_file_enumerator_get_child(enumerator, info);
+        GFile *child = g_file_enumerator_get_child(data->enumerator, info);
         char *path = g_file_get_path(child);
         char *uri = g_file_get_uri(child);
         
@@ -74,13 +91,29 @@ static void on_enumerate_children_ready(GObject *source_object, GAsyncResult *re
         g_free(path);
         g_free(uri);
         g_object_unref(child);
-        g_object_unref(info);
     }
     
-    g_object_unref(enumerator);
+    g_list_free_full(files, g_object_unref);
     
-    g_task_return_pointer(data->task, g_object_ref(data->store), g_object_unref);
-    list_dir_data_free(data);
+    /* Fetch more */
+    fetch_next_files(data);
+}
+
+static void on_enumerate_children_ready(GObject *source_object, GAsyncResult *res, gpointer user_data) {
+    GFile *file = G_FILE(source_object);
+    GError *error = NULL;
+    GFileEnumerator *enumerator = g_file_enumerate_children_finish(file, res, &error);
+    
+    ListDirData *data = user_data;
+    
+    if (error) {
+        g_task_return_error(data->task, error);
+        list_dir_data_free(data);
+        return;
+    }
+    
+    data->enumerator = enumerator;
+    fetch_next_files(data);
 }
 
 static void gio_list_directory_async(AetherFileRepository *repo, const char *path, GCancellable *cancellable, GAsyncReadyCallback callback, gpointer user_data) {
