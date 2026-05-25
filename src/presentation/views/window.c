@@ -111,6 +111,10 @@ static void aether_window_init(AetherWindow *self) {
     gtk_grid_view_set_enable_rubberband(GTK_GRID_VIEW(self->grid_view), TRUE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(grid_scrolled), self->grid_view);
     g_signal_connect(self->grid_view, "activate", G_CALLBACK(on_item_activated), self);
+    GtkGesture *bg_click_grid = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(bg_click_grid), GDK_BUTTON_SECONDARY);
+    g_signal_connect(bg_click_grid, "pressed", G_CALLBACK(on_background_right_clicked), self);
+    gtk_widget_add_controller(self->grid_view, GTK_EVENT_CONTROLLER(bg_click_grid));
 
     GtkListItemFactory *gf = gtk_signal_list_item_factory_new();
     g_signal_connect(gf, "setup",   G_CALLBACK(setup_grid_item),  NULL);
@@ -126,6 +130,10 @@ static void aether_window_init(AetherWindow *self) {
     gtk_column_view_set_show_row_separators(GTK_COLUMN_VIEW(self->list_view), FALSE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(list_scrolled), self->list_view);
     g_signal_connect(self->list_view, "activate", G_CALLBACK(on_item_activated), self);
+    GtkGesture *bg_click_list = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(bg_click_list), GDK_BUTTON_SECONDARY);
+    g_signal_connect(bg_click_list, "pressed", G_CALLBACK(on_background_right_clicked), self);
+    gtk_widget_add_controller(self->list_view, GTK_EVENT_CONTROLLER(bg_click_list));
 
     GtkListItemFactory *lf = gtk_signal_list_item_factory_new();
     g_signal_connect(lf, "setup",   G_CALLBACK(setup_list_item),  NULL);

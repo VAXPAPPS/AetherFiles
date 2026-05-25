@@ -107,3 +107,37 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
     }
     g_object_unref(menu);
 }
+
+void on_background_right_clicked(GtkGestureClick *gesture, int n_press,
+                                 double x, double y, gpointer user_data)
+{
+    (void)gesture; (void)n_press;
+    AetherWindow *self = AETHER_WINDOW(user_data);
+    
+    const char *current_path = aether_window_get_current_path(self);
+    if (!current_path) return;
+
+    GMenu *menu = g_menu_new();
+
+    /* Paste */
+    GMenuItem *mi = g_menu_item_new("Paste", NULL);
+    g_menu_item_set_action_and_target_value(mi, "app.paste", NULL);
+    g_menu_append_item(menu, mi); g_object_unref(mi);
+
+    /* Properties */
+    mi = g_menu_item_new("Properties", NULL);
+    g_menu_item_set_action_and_target_value(mi, "app.properties", g_variant_new_string(current_path));
+    g_menu_append_item(menu, mi); g_object_unref(mi);
+
+    GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    GtkWidget *widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+    
+    gtk_widget_set_parent(popover, widget);
+    g_signal_connect(popover, "closed", G_CALLBACK(on_popover_closed), NULL);
+    
+    GdkRectangle rect = { (int)x, (int)y, 1, 1 };
+    gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+    gtk_popover_popup(GTK_POPOVER(popover));
+    
+    g_object_unref(menu);
+}

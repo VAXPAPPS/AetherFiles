@@ -94,6 +94,7 @@ void unbind_size_col_item(GtkListItemFactory *f, GtkListItem *item, gpointer ud)
 gint compare_entities(gconstpointer a, gconstpointer b, gpointer user_data);
 gboolean name_filter_func(gpointer item, gpointer user_data);
 void on_item_right_clicked(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data);
+void on_background_right_clicked(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data);
 void on_popover_closed(GtkPopover *popover, gpointer user_data);
 void load_directory(AetherWindow *self, const char *path);
 void update_nav_buttons(AetherWindow *self);
