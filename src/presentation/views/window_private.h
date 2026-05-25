@@ -85,6 +85,8 @@ typedef struct {
 /* Internal prototypes exposed to components */
 void load_bookmarks(AetherWindow *self);
 void save_bookmark(const char *path);
+void remove_bookmark(const char *path);
+gboolean is_bookmarked(const char *path);
 void add_sidebar_separator(AetherWindow *self);
 void add_sidebar_header(AetherWindow *self, const char *title);
 void add_sidebar_place(AetherWindow *self, const char *name, const char *icon, const char *path);
@@ -131,6 +133,8 @@ gboolean on_key_up(GtkWidget *w, GVariant *args, gpointer ud);
 gboolean on_key_refresh(GtkWidget *w, GVariant *args, gpointer ud);
 void on_add_bookmark_action(GSimpleAction *a, GVariant *p, gpointer ud);
 void on_add_bookmark_path_action(GSimpleAction *a, GVariant *p, gpointer ud);
+void on_remove_bookmark_action(GSimpleAction *a, GVariant *p, gpointer ud);
+void on_remove_bookmark_path_action(GSimpleAction *a, GVariant *p, gpointer ud);
 gboolean on_drop_target(GtkDropTarget *t, const GValue *val, double x, double y, gpointer ud);
 void setup_drag_drop(AetherWindow *self, GtkWidget *view);
 GdkContentProvider *on_drag_prepare(GtkDragSource *source, double x, double y, gpointer user_data);

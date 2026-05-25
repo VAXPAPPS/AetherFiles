@@ -388,6 +388,16 @@ static void aether_window_init(AetherWindow *self) {
     g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(add_bm_path));
     g_object_unref(add_bm_path);
 
+    GSimpleAction *rm_bm = g_simple_action_new("remove-bookmark", NULL);
+    g_signal_connect(rm_bm, "activate", G_CALLBACK(on_remove_bookmark_action), self);
+    g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(rm_bm));
+    g_object_unref(rm_bm);
+
+    GSimpleAction *rm_bm_path = g_simple_action_new("remove-bookmark-path", G_VARIANT_TYPE_STRING);
+    g_signal_connect(rm_bm_path, "activate", G_CALLBACK(on_remove_bookmark_path_action), self);
+    g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(rm_bm_path));
+    g_object_unref(rm_bm_path);
+
     /* ══ Create first tab ══ */
     new_tab(self, g_get_home_dir());
 

@@ -124,12 +124,24 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
     GtkCustomFilter    *filter   = gtk_custom_filter_new(name_filter_func, self, NULL);
     GtkFilterListModel *filtered = gtk_filter_list_model_new(G_LIST_MODEL(sorted), GTK_FILTER(filter));
 
+    /* Clear the views first to release old selection models */
+    GtkSelectionModel *old_grid_sel = gtk_grid_view_get_model(GTK_GRID_VIEW(self->grid_view));
+    if (old_grid_sel) gtk_selection_model_unselect_all(old_grid_sel);
+    gtk_grid_view_set_model(GTK_GRID_VIEW(self->grid_view), NULL);
+
+    GtkSelectionModel *old_list_sel = gtk_column_view_get_model(GTK_COLUMN_VIEW(self->list_view));
+    if (old_list_sel) gtk_selection_model_unselect_all(old_list_sel);
+    gtk_column_view_set_model(GTK_COLUMN_VIEW(self->list_view), NULL);
+
+    /* Unref the old filter_model (which recursively unrefs sorted, visible, filter, and sorter) */
+    if (self->filter_model) {
+        g_object_unref(self->filter_model);
+        self->filter_model = NULL;
+    }
+
     self->filter_model = filtered;
     self->name_filter  = filter;
     self->sorter       = sorter;
-
-    gtk_grid_view_set_model(GTK_GRID_VIEW(self->grid_view), NULL);
-    gtk_column_view_set_model(GTK_COLUMN_VIEW(self->list_view), NULL);
 
     GtkMultiSelection *grid_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
     gtk_grid_view_set_model(GTK_GRID_VIEW(self->grid_view), GTK_SELECTION_MODEL(grid_sel));

@@ -217,6 +217,23 @@ void on_add_bookmark_path_action(GSimpleAction *a, GVariant *p, gpointer ud) {
     load_bookmarks(w);
 }
 
+void on_remove_bookmark_action(GSimpleAction *a, GVariant *p, gpointer ud) {
+    (void)a; (void)p;
+    AetherWindow *w = AETHER_WINDOW(ud);
+    if (!w->current_path) return;
+    remove_bookmark(w->current_path);
+    load_bookmarks(w);
+}
+
+void on_remove_bookmark_path_action(GSimpleAction *a, GVariant *p, gpointer ud) {
+    (void)a;
+    AetherWindow *w = AETHER_WINDOW(ud);
+    const char *path = g_variant_get_string(p, NULL);
+    if (!path) return;
+    remove_bookmark(path);
+    load_bookmarks(w);
+}
+
 gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
                                double x, double y, gpointer ud)
 {

@@ -7,6 +7,16 @@
 GtkWidget *make_sidebar_row(const char *name, const char *icon_name);
 
 void load_bookmarks(AetherWindow *self) {
+    /* Remove old bookmark rows first */
+    GtkWidget *child = gtk_widget_get_first_child(self->sidebar_list);
+    while (child) {
+        GtkWidget *next = gtk_widget_get_next_sibling(child);
+        if (g_object_get_data(G_OBJECT(child), "is-bookmark")) {
+            gtk_list_box_remove(GTK_LIST_BOX(self->sidebar_list), child);
+        }
+        child = next;
+    }
+
     char *bm_path = g_build_filename(g_get_home_dir(), BOOKMARKS_FILE, NULL);
     gchar *contents = NULL;
     if (!g_file_get_contents(bm_path, &contents, NULL, NULL)) {
@@ -14,15 +24,6 @@ void load_bookmarks(AetherWindow *self) {
         return;
     }
     g_free(bm_path);
-
-    /* Remove old bookmark rows */
-    GtkListBoxRow *row;
-    int count = 0;
-    while ((row = gtk_list_box_get_row_at_index(
-                GTK_LIST_BOX(self->sidebar_list),
-                self->bookmark_row_start + count)) != NULL) {
-        gtk_list_box_remove(GTK_LIST_BOX(self->sidebar_list), GTK_WIDGET(row));
-    }
 
     char **lines = g_strsplit(contents, "\n", -1);
     g_free(contents);
@@ -43,6 +44,7 @@ void load_bookmarks(AetherWindow *self) {
                              parts[1] : g_path_get_basename(path);
 
         GtkWidget *bm_row = make_sidebar_row(label, "bookmark-new-symbolic");
+        g_object_set_data(G_OBJECT(bm_row), "is-bookmark", GINT_TO_POINTER(1));
         g_object_set_data_full(G_OBJECT(bm_row), "path", g_strdup(path), g_free);
         gtk_list_box_append(GTK_LIST_BOX(self->sidebar_list), bm_row);
 
@@ -68,6 +70,65 @@ void save_bookmark(const char *path) {
     g_file_set_contents(bm_path, new_contents, -1, NULL);
     g_free(existing); g_free(uri); g_free(new_line);
     g_free(new_contents); g_free(bm_path);
+}
+
+void remove_bookmark(const char *path) {
+    char *bm_path = g_build_filename(g_get_home_dir(), BOOKMARKS_FILE, NULL);
+    gchar *existing = NULL;
+    if (!g_file_get_contents(bm_path, &existing, NULL, NULL)) {
+        g_free(bm_path);
+        return;
+    }
+
+    char *uri = g_filename_to_uri(path, NULL, NULL);
+    char **lines = g_strsplit(existing, "\n", -1);
+    GString *new_contents = g_string_new("");
+
+    for (int i = 0; lines[i]; i++) {
+        if (lines[i][0] == '\0') continue;
+        char **parts = g_strsplit(lines[i], " ", 2);
+        if (g_strcmp0(parts[0], uri) != 0) {
+            g_string_append_printf(new_contents, "%s\n", lines[i]);
+        }
+        g_strfreev(parts);
+    }
+
+    g_file_set_contents(bm_path, new_contents->str, new_contents->len, NULL);
+
+    g_string_free(new_contents, TRUE);
+    g_strfreev(lines);
+    g_free(uri);
+    g_free(existing);
+    g_free(bm_path);
+}
+
+gboolean is_bookmarked(const char *path) {
+    char *bm_path = g_build_filename(g_get_home_dir(), BOOKMARKS_FILE, NULL);
+    gchar *existing = NULL;
+    if (!g_file_get_contents(bm_path, &existing, NULL, NULL)) {
+        g_free(bm_path);
+        return FALSE;
+    }
+
+    char *uri = g_filename_to_uri(path, NULL, NULL);
+    char **lines = g_strsplit(existing, "\n", -1);
+    gboolean found = FALSE;
+
+    for (int i = 0; lines[i]; i++) {
+        if (lines[i][0] == '\0') continue;
+        char **parts = g_strsplit(lines[i], " ", 2);
+        if (g_strcmp0(parts[0], uri) == 0) {
+            found = TRUE;
+        }
+        g_strfreev(parts);
+        if (found) break;
+    }
+
+    g_strfreev(lines);
+    g_free(uri);
+    g_free(existing);
+    g_free(bm_path);
+    return found;
 }
 
 GtkWidget *make_sidebar_row(const char *name, const char *icon_name) {

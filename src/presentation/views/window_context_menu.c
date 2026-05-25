@@ -128,8 +128,13 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
         /* Properties + Bookmarks */
         GMenu *s4 = g_menu_new();
         if (aether_file_entity_is_directory(entity)) {
-            mi = g_menu_item_new("Add to Bookmarks", NULL);
-            g_menu_item_set_action_and_target_value(mi, "win.add-bookmark-path", g_variant_new_string(path ? path : ""));
+            if (is_bookmarked(path)) {
+                mi = g_menu_item_new("Remove from Bookmarks", NULL);
+                g_menu_item_set_action_and_target_value(mi, "win.remove-bookmark-path", g_variant_new_string(path ? path : ""));
+            } else {
+                mi = g_menu_item_new("Add to Bookmarks", NULL);
+                g_menu_item_set_action_and_target_value(mi, "win.add-bookmark-path", g_variant_new_string(path ? path : ""));
+            }
             g_menu_append_item(s4, mi); g_object_unref(mi);
         }
         mi = g_menu_item_new("Properties", NULL);
