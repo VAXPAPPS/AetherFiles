@@ -1,5 +1,8 @@
 #include "window_private.h"
 #include <glib/gi18n.h>
+#ifdef G_OS_UNIX
+#include <gio/gdesktopappinfo.h>
+#endif
 
 void load_directory(AetherWindow *self, const char *path) {
     if (self->current_path)
@@ -229,8 +232,63 @@ void on_item_activated(GtkWidget *view, guint position, gpointer user_data) {
     if (aether_file_entity_is_directory(e)) {
         load_directory(self, aether_file_entity_get_path(e));
     } else {
+        const char *path = aether_file_entity_get_path(e);
         const char *uri = aether_file_entity_get_uri(e);
-        if (uri) g_app_info_launch_default_for_uri_async(uri, NULL, NULL, NULL, NULL);
+        gboolean executed = FALSE;
+
+        if (path && g_file_test(path, G_FILE_TEST_IS_EXECUTABLE)) {
+            GFile *file = g_file_new_for_path(path);
+            GFileInfo *info = g_file_query_info(file, G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE,
+                                                G_FILE_QUERY_INFO_NONE, NULL, NULL);
+            if (info) {
+                const char *ctype = g_file_info_get_content_type(info);
+                if (ctype) {
+                    if (g_content_type_is_a(ctype, "application/x-executable") ||
+                        g_content_type_is_a(ctype, "application/x-shellscript") ||
+                        g_content_type_is_a(ctype, "application/x-sharedlib") ||
+                        g_content_type_is_a(ctype, "application/vnd.appimage") ||
+                        g_str_has_suffix(path, ".AppImage") ||
+                        g_str_has_suffix(path, ".sh") ||
+                        g_str_has_suffix(path, ".run")) {
+                        
+                        GError *err = NULL;
+                        char *dir = g_path_get_dirname(path);
+                        char *argv[] = { (char *)path, NULL };
+                        if (g_spawn_async(dir, argv, NULL,
+                                          G_SPAWN_SEARCH_PATH, NULL, NULL, NULL, &err)) {
+                            executed = TRUE;
+                        } else {
+                            g_printerr("Failed to execute application: %s\n", err->message);
+                            g_error_free(err);
+                        }
+                        g_free(dir);
+                    }
+                }
+                g_object_unref(info);
+            }
+            g_object_unref(file);
+        }
+
+#ifdef G_OS_UNIX
+        /* Special handling for .desktop files */
+        if (!executed && path && g_str_has_suffix(path, ".desktop")) {
+            GDesktopAppInfo *app_info = g_desktop_app_info_new_from_filename(path);
+            if (app_info) {
+                GError *err = NULL;
+                if (g_app_info_launch(G_APP_INFO(app_info), NULL, NULL, &err)) {
+                    executed = TRUE;
+                } else {
+                    g_printerr("Failed to launch desktop file: %s\n", err->message);
+                    g_error_free(err);
+                }
+                g_object_unref(app_info);
+            }
+        }
+#endif
+
+        if (!executed && uri) {
+            g_app_info_launch_default_for_uri_async(uri, NULL, NULL, NULL, NULL);
+        }
     }
     g_object_unref(item);
 }
