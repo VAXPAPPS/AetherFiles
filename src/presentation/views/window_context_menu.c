@@ -11,6 +11,30 @@ void on_popover_closed(GtkPopover *popover, gpointer user_data) {
     g_idle_add(idle_unparent, popover);
 }
 
+static gboolean is_media_file(const char *name) {
+    if (!name) return FALSE;
+    const char *ext = strrchr(name, '.');
+    if (!ext) return FALSE;
+    ext++;
+
+    const char *media_exts[] = {
+        "png", "jpg", "jpeg", "gif", "bmp", "webp", "svg",
+        "mp4", "mkv", "webm", "avi", "mov", "flv", "wmv",
+        NULL
+    };
+
+    char *lower_ext = g_utf8_casefold(ext, -1);
+    gboolean is_media = FALSE;
+    for (int i = 0; media_exts[i] != NULL; i++) {
+        if (g_strcmp0(lower_ext, media_exts[i]) == 0) {
+            is_media = TRUE;
+            break;
+        }
+    }
+    g_free(lower_ext);
+    return is_media;
+}
+
 void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
                                    double x, double y, gpointer user_data)
 {
@@ -90,7 +114,7 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
         g_menu_item_set_action_and_target_value(mi, "app.rename-path", g_variant_new_string(path ? path : ""));
         g_menu_append_item(s3, mi); g_object_unref(mi);
 
-        if (!aether_file_entity_is_directory(entity)) {
+        if (is_media_file(aether_file_entity_get_name(entity))) {
             mi = g_menu_item_new("Set as Background…", NULL);
             g_menu_item_set_action_and_target_value(mi, "app.set_background", g_variant_new_string(path ? path : ""));
             g_menu_append_item(s3, mi); g_object_unref(mi);

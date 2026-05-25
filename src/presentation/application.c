@@ -401,9 +401,21 @@ static void on_properties_action(GSimpleAction *action, GVariant *parameter, gpo
 static void on_set_background_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action; (void)user_data;
     const char *path = g_variant_get_string(parameter, NULL);
-    char *cmd = g_strdup_printf("vaxp-setbg \"%s\"", path);
-    g_spawn_command_line_async(cmd, NULL);
-    g_free(cmd);
+    if (!path) return;
+
+    const char *config_dir = g_get_user_config_dir();
+    char *vaxp_dir = g_build_filename(config_dir, "vaxp", NULL);
+    g_mkdir_with_parents(vaxp_dir, 0755);
+
+    char *wallpaper_file = g_build_filename(vaxp_dir, "wallpaper", NULL);
+    GError *err = NULL;
+    g_file_set_contents(wallpaper_file, path, -1, &err);
+    if (err) {
+        g_printerr("Failed to set background: %s\n", err->message);
+        g_error_free(err);
+    }
+    g_free(wallpaper_file);
+    g_free(vaxp_dir);
 }
 
 /* ── app init ── */
