@@ -10,6 +10,7 @@ aetherfiles_sources = [
   'presentation/views/window_nav.c',
   'presentation/views/window_actions.c',
   'presentation/views/window_tabs.c',
+  'presentation/views/window_context_menu.c',
   'presentation/controllers/clipboard_controller.c',
 ]
 
