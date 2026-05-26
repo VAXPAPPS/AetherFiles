@@ -35,6 +35,18 @@ static gboolean is_media_file(const char *name) {
     return is_media;
 }
 
+static gboolean is_archive_file(const char *name) {
+    if (!name) return FALSE;
+    char *lower_name = g_utf8_casefold(name, -1);
+    gboolean is_archive = g_str_has_suffix(lower_name, ".zip") || 
+                          g_str_has_suffix(lower_name, ".tar.xz") || 
+                          g_str_has_suffix(lower_name, ".7z") ||
+                          g_str_has_suffix(lower_name, ".tar") ||
+                          g_str_has_suffix(lower_name, ".tar.gz");
+    g_free(lower_name);
+    return is_archive;
+}
+
 void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
                                    double x, double y, gpointer user_data)
 {
@@ -119,6 +131,30 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
             g_menu_item_set_action_and_target_value(mi, "app.set_background", g_variant_new_string(path ? path : ""));
             g_menu_append_item(s3, mi); g_object_unref(mi);
         }
+
+        if (is_archive_file(aether_file_entity_get_name(entity))) {
+            mi = g_menu_item_new("Extract Here", NULL);
+            g_menu_item_set_action_and_target_value(mi, "app.extract", g_variant_new_string(path ? path : ""));
+            g_menu_append_item(s3, mi); g_object_unref(mi);
+        }
+        
+        GMenu *compress_menu = g_menu_new();
+        mi = g_menu_item_new(".zip", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.compress", g_variant_new_string("zip"));
+        g_menu_append_item(compress_menu, mi); g_object_unref(mi);
+        
+        mi = g_menu_item_new(".tar.xz", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.compress", g_variant_new_string("tar.xz"));
+        g_menu_append_item(compress_menu, mi); g_object_unref(mi);
+        
+        mi = g_menu_item_new(".7z", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.compress", g_variant_new_string("7z"));
+        g_menu_append_item(compress_menu, mi); g_object_unref(mi);
+        
+        mi = g_menu_item_new("Compress…", NULL);
+        g_menu_item_set_submenu(mi, G_MENU_MODEL(compress_menu));
+        g_menu_append_item(s3, mi); g_object_unref(mi);
+        g_object_unref(compress_menu);
 
         mi = g_menu_item_new("Move to Trash", NULL);
         g_menu_item_set_action_and_target_value(mi, "app.trash", NULL);

@@ -8,6 +8,7 @@ aetherfiles_sources = [
   'data/drive_manager.c',
   'data/app_repository.c',
   'data/thumbnail_manager.c',
+  'data/archive_manager.c',
   'presentation/application.c',
   'presentation/views/window.c',
   'presentation/views/window_sidebar.c',

@@ -1,6 +1,7 @@
 #include "application.h"
 #include "views/window.h"
 #include "controllers/clipboard_controller.h"
+#include "../data/archive_manager.h"
 #include <gio/gio.h>
 #include <string.h>
 
@@ -205,14 +206,104 @@ static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer
     if (!paths) return;
     
     for (int i = 0; paths[i]; i++) {
-        GFile  *file = g_file_parse_name(paths[i]);
+        GFile  *f = g_file_parse_name(paths[i]);
         GError *err  = NULL;
-        g_file_trash(file, NULL, &err);
-        if (err) { g_printerr("Trash error: %s\n", err->message); g_error_free(err); }
-        g_object_unref(file);
+        if (!g_file_trash(f, NULL, &err)) {
+            g_printerr("Trash failed: %s\n", err->message);
+            g_error_free(err);
+        } else {
+            aether_window_reload(win);
+        }
+        g_object_unref(f);
     }
     g_strfreev(paths);
+}
+
+static void on_archive_finished(GObject *source, GAsyncResult *res, gpointer user_data) {
+    (void)source;
+    AetherWindow *win = AETHER_WINDOW(user_data);
+    GError *err = NULL;
+    gboolean success = g_task_propagate_boolean(G_TASK(res), &err);
+    
+    if (!success || err) {
+        g_printerr("Archive operation failed: %s\n", err ? err->message : "Unknown error");
+        if (err) g_error_free(err);
+    }
+    
+    aether_window_stop_progress(win);
     aether_window_reload(win);
+}
+
+static void on_extract_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    AetherWindow *win = get_active_win(G_APPLICATION(user_data));
+    if (!win) return;
+
+    const char *archive_path = g_variant_get_string(parameter, NULL);
+    if (!archive_path || strlen(archive_path) == 0) return;
+    
+    char *dest_dir = g_path_get_dirname(archive_path);
+    
+    aether_window_start_progress(win);
+
+    aether_archive_manager_extract_async(aether_archive_manager_get_default(), 
+                                         archive_path, dest_dir, 
+                                         on_archive_finished, win);
+    g_free(dest_dir);
+}
+
+static void on_compress_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    AetherWindow *win = get_active_win(G_APPLICATION(user_data));
+    if (!win) return;
+
+    const char *format = g_variant_get_string(parameter, NULL);
+    if (!format) return;
+    
+    GStrv paths = aether_window_get_selected_paths(win);
+    if (!paths || !paths[0]) {
+        g_strfreev(paths);
+        return;
+    }
+    
+    const char *current_dir = aether_window_get_current_path(win);
+    if (!current_dir) {
+        g_strfreev(paths);
+        return;
+    }
+    
+    char *base_name;
+    if (g_strv_length(paths) == 1) {
+        base_name = g_path_get_basename(paths[0]);
+        char *dot = strrchr(base_name, '.');
+        if (dot && dot != base_name) {
+            *dot = '\0';
+        }
+    } else {
+        base_name = g_path_get_basename(current_dir);
+    }
+    
+    char *dest_name = g_strdup_printf("%s.%s", base_name, format);
+    g_free(base_name);
+    char *dest_path = g_build_filename(current_dir, dest_name, NULL);
+    
+    int counter = 1;
+    while (g_file_test(dest_path, G_FILE_TEST_EXISTS)) {
+        g_free(dest_path);
+        g_free(dest_name);
+        dest_name = g_strdup_printf("%s (%d).%s", base_name, counter++, format);
+        dest_path = g_build_filename(current_dir, dest_name, NULL);
+    }
+    
+    aether_window_start_progress(win);
+
+    aether_archive_manager_compress_async(aether_archive_manager_get_default(), 
+                                          paths, dest_path, format, 
+                                          on_archive_finished, win);
+                                          
+    g_free(dest_path);
+    g_free(dest_name);
+    g_strfreev(paths);
 }
 
 static void on_restore_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
@@ -455,6 +546,8 @@ static void aether_application_init(AetherApplication *app) {
         { "restore-all",    G_CALLBACK(on_restore_all_action),    NULL },
         { "properties",     G_CALLBACK(on_properties_action),     G_VARIANT_TYPE_STRING },
         { "set_background", G_CALLBACK(on_set_background_action), G_VARIANT_TYPE_STRING },
+        { "extract",        G_CALLBACK(on_extract_action),        G_VARIANT_TYPE_STRING },
+        { "compress",       G_CALLBACK(on_compress_action),       G_VARIANT_TYPE_STRING },
         { NULL, NULL, NULL }
     };
 
