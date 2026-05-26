@@ -187,6 +187,17 @@ static void aether_bluetooth_share_dialog_init(AetherBluetoothShareDialog *self)
     gtk_window_set_default_size(GTK_WINDOW(self), 400, 500);
     gtk_window_set_modal(GTK_WINDOW(self), TRUE);
 
+    gtk_widget_add_css_class(GTK_WIDGET(self), "bluetooth-share-dialog");
+
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(provider, 
+        "window.bluetooth-share-dialog { background-color: rgba(0,0,0,0.3); }\n"
+        "window.bluetooth-share-dialog scrolledwindow, "
+        "window.bluetooth-share-dialog viewport, "
+        "window.bluetooth-share-dialog list { background-color: transparent; }");
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
     GtkWidget *header = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
