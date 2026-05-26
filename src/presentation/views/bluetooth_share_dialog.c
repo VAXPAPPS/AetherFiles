@@ -20,21 +20,57 @@ static void aether_bluetooth_share_dialog_finalize(GObject *object) {
     G_OBJECT_CLASS(aether_bluetooth_share_dialog_parent_class)->finalize(object);
 }
 
-static int pending_transfers = 0;
+static void send_system_notification(const char *title, const char *body, const char *icon_name) {
+    GApplication *app = g_application_get_default();
+    if (!app) return;
+
+    GNotification *notification = g_notification_new(title);
+    if (body) g_notification_set_body(notification, body);
+    
+    if (icon_name) {
+        GIcon *icon = g_themed_icon_new(icon_name);
+        g_notification_set_icon(notification, icon);
+        g_object_unref(icon);
+    }
+
+    char *id = g_strdup_printf("bluetooth-share-%ld", g_get_real_time());
+    g_application_send_notification(app, id, notification);
+    g_free(id);
+    g_object_unref(notification);
+}
+
+typedef struct {
+    int pending;
+    int successful;
+    int failed;
+    char *device_name;
+} ShareContext;
 
 static void on_file_sent(GObject *source, GAsyncResult *res, gpointer user_data) {
-    AetherBluetoothShareDialog *self = AETHER_BLUETOOTH_SHARE_DIALOG(user_data);
+    ShareContext *ctx = (ShareContext *)user_data;
     GError *error = NULL;
     gboolean success = aether_bluez_dbus_manager_send_file_finish(AETHER_BLUEZ_DBUS_MANAGER(source), res, &error);
     
     if (!success) {
         g_printerr("Failed to send file over Bluetooth: %s\n", error->message);
         g_error_free(error);
+        ctx->failed++;
+    } else {
+        ctx->successful++;
     }
     
-    pending_transfers--;
-    if (pending_transfers <= 0) {
-        gtk_window_destroy(GTK_WINDOW(self));
+    ctx->pending--;
+    if (ctx->pending <= 0) {
+        char *body;
+        if (ctx->failed == 0) {
+            body = g_strdup_printf("Successfully sent %d file(s) to %s.", ctx->successful, ctx->device_name);
+        } else {
+            body = g_strdup_printf("Transfer complete: %d sent, %d failed to %s.", ctx->successful, ctx->failed, ctx->device_name);
+        }
+        send_system_notification("Bluetooth Transfer Complete", body, "bluetooth-active-symbolic");
+        g_free(body);
+        g_free(ctx->device_name);
+        g_free(ctx);
     }
 }
 
@@ -47,22 +83,27 @@ static void on_device_selected(GtkListBox *box, GtkListBoxRow *row, AetherBlueto
     const char *address = aether_bluetooth_device_entity_get_address(device);
     const char *name = aether_bluetooth_device_entity_get_name(device);
 
-    char *msg = g_strdup_printf("Sending to %s...", name);
-    gtk_label_set_text(GTK_LABEL(self->status_label), msg);
-    g_free(msg);
-
-    gtk_widget_set_visible(self->spinner, TRUE);
-
     if (self->files_to_share) {
-        for (int i = 0; self->files_to_share[i] != NULL; i++) {
-            pending_transfers++;
-            aether_bluez_dbus_manager_send_file_async(self->dbus_manager, address, self->files_to_share[i], on_file_sent, self);
+        int total_files = g_strv_length(self->files_to_share);
+        if (total_files > 0) {
+            ShareContext *ctx = g_new0(ShareContext, 1);
+            ctx->pending = total_files;
+            ctx->successful = 0;
+            ctx->failed = 0;
+            ctx->device_name = g_strdup(name);
+
+            char *msg = g_strdup_printf("Sending %d file(s) to %s...", total_files, name);
+            send_system_notification("Bluetooth Transfer Started", msg, "bluetooth-active-symbolic");
+            g_free(msg);
+
+            for (int i = 0; self->files_to_share[i] != NULL; i++) {
+                aether_bluez_dbus_manager_send_file_async(self->dbus_manager, address, self->files_to_share[i], on_file_sent, ctx);
+            }
         }
     }
     
-    if (pending_transfers == 0) {
-        gtk_window_destroy(GTK_WINDOW(self));
-    }
+    /* Close dialog immediately so user doesn't have to wait */
+    gtk_window_destroy(GTK_WINDOW(self));
 }
 
 static GtkWidget *create_device_row(AetherBluetoothDeviceEntity *device) {

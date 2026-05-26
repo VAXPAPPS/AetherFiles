@@ -117,27 +117,85 @@ typedef struct {
     char *device_address;
     char *file_path;
     AetherBluezDbusManager *manager;
+    guint subscription_id;
+    GTask *task;
 } ObexTransferData;
 
 static void obex_transfer_data_free(ObexTransferData *data) {
+    if (data->subscription_id > 0 && data->manager && data->manager->session_bus) {
+        g_dbus_connection_signal_unsubscribe(data->manager->session_bus, data->subscription_id);
+    }
     g_free(data->device_address);
     g_free(data->file_path);
     g_clear_object(&data->manager);
     g_free(data);
 }
 
+static void on_transfer_properties_changed(GDBusConnection *connection,
+                                           const gchar *sender_name,
+                                           const gchar *object_path,
+                                           const gchar *interface_name,
+                                           const gchar *signal_name,
+                                           GVariant *parameters,
+                                           gpointer user_data)
+{
+    ObexTransferData *transfer = (ObexTransferData *)user_data;
+    if (!transfer->task) return;
+
+    const gchar *iface;
+    GVariant *changed_properties = NULL;
+    g_variant_get(parameters, "(&s@a{sv}@as)", &iface, &changed_properties, NULL);
+
+    if (g_strcmp0(iface, "org.bluez.obex.Transfer1") == 0) {
+        const gchar *status = NULL;
+        if (g_variant_lookup(changed_properties, "Status", "&s", &status)) {
+            if (g_strcmp0(status, "complete") == 0) {
+                GTask *t = transfer->task;
+                transfer->task = NULL;
+                g_task_return_boolean(t, TRUE);
+                g_object_unref(t);
+            } else if (g_strcmp0(status, "error") == 0) {
+                GTask *t = transfer->task;
+                transfer->task = NULL;
+                g_task_return_new_error(t, G_IO_ERROR, G_IO_ERROR_FAILED, "Bluetooth transfer failed");
+                g_object_unref(t);
+            }
+        }
+    }
+    if (changed_properties) g_variant_unref(changed_properties);
+}
+
 static void on_obex_send_file_ready(GObject *source_object, GAsyncResult *res, gpointer user_data) {
     GTask *task = G_TASK(user_data);
+    ObexTransferData *transfer = g_task_get_task_data(task);
     GError *error = NULL;
     
     GVariant *result = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source_object), res, &error);
     if (error) {
         g_task_return_error(task, error);
-    } else {
-        g_variant_unref(result);
-        g_task_return_boolean(task, TRUE);
+        g_object_unref(task);
+        return;
     }
-    g_object_unref(task);
+
+    const char *transfer_path = NULL;
+    g_variant_get(result, "(&o@a{sv})", &transfer_path, NULL);
+
+    transfer->task = task;
+    
+    transfer->subscription_id = g_dbus_connection_signal_subscribe(
+        transfer->manager->session_bus,
+        "org.bluez.obex",
+        "org.freedesktop.DBus.Properties",
+        "PropertiesChanged",
+        transfer_path,
+        NULL,
+        G_DBUS_SIGNAL_FLAGS_NONE,
+        on_transfer_properties_changed,
+        transfer,
+        NULL
+    );
+
+    g_variant_unref(result);
 }
 
 static void on_obex_session_ready(GObject *source_object, GAsyncResult *res, gpointer user_data) {
