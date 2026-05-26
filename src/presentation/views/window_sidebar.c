@@ -432,8 +432,7 @@ void setup_sidebar(AetherWindow *self) {
     gtk_widget_add_css_class(self->sidebar_list, "navigation-sidebar");
 
     /* Pinned */
-    add_sidebar_place(self, "Recent",    "document-open-recent-symbolic", g_get_home_dir());
-    add_sidebar_place(self, "Starred",   "starred-symbolic",              g_get_home_dir());
+
     add_sidebar_place(self, "Home",      "user-home-symbolic",            g_get_home_dir());
 
     char *work_path = g_build_filename(g_get_home_dir(), "Work", NULL);
