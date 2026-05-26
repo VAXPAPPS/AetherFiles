@@ -224,10 +224,23 @@ static void aether_window_init(AetherWindow *self) {
     /* ══ Search bar ══ */
     self->search_entry = gtk_search_entry_new();
     gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(self->search_entry), "Search files…");
+    gtk_widget_set_hexpand(self->search_entry, TRUE);
     g_signal_connect(self->search_entry, "search-changed", G_CALLBACK(on_search_changed), self);
 
+    const char *filter_opts[] = {"All", "Media", "Document", "Folder", "Apps", "Archive", NULL};
+    GtkWidget *filter_dropdown = gtk_drop_down_new_from_strings(filter_opts);
+    gtk_widget_add_css_class(filter_dropdown, "flat");
+    g_signal_connect(filter_dropdown, "notify::selected", G_CALLBACK(on_search_filter_changed), self);
+
+    GtkWidget *search_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_halign(search_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_size_request(search_box, 400, -1);
+    gtk_box_append(GTK_BOX(search_box), self->search_entry);
+    gtk_box_append(GTK_BOX(search_box), filter_dropdown);
+
     self->search_bar = gtk_search_bar_new();
-    gtk_search_bar_set_child(GTK_SEARCH_BAR(self->search_bar), self->search_entry);
+    gtk_search_bar_set_child(GTK_SEARCH_BAR(self->search_bar), search_box);
+    gtk_search_bar_connect_entry(GTK_SEARCH_BAR(self->search_bar), GTK_EDITABLE(self->search_entry));
     gtk_search_bar_set_show_close_button(GTK_SEARCH_BAR(self->search_bar), TRUE);
 
     /* ══ Content header ══ */
@@ -274,6 +287,7 @@ static void aether_window_init(AetherWindow *self) {
     g_object_bind_property(search_btn, "active",
                             self->search_bar, "search-mode-enabled",
                             G_BINDING_BIDIRECTIONAL);
+    g_signal_connect(self->search_bar, "notify::search-mode-enabled", G_CALLBACK(on_search_mode_toggled), self);
 
     gtk_box_append(GTK_BOX(view_box), self->btn_list);
     gtk_box_append(GTK_BOX(view_box), self->btn_grid);

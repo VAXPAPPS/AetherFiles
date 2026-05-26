@@ -352,6 +352,37 @@ gboolean name_filter_func(gpointer item, gpointer user_data) {
         return FALSE;
     }
     
+    if (self->search_bar && gtk_search_bar_get_search_mode(GTK_SEARCH_BAR(self->search_bar)) && self->search_filter_type > 0) {
+        gboolean is_dir = aether_file_entity_is_directory(e);
+        const char *icon = aether_file_entity_get_icon_name(e);
+        if (!icon) icon = "";
+        
+        gboolean type_match = FALSE;
+        switch (self->search_filter_type) {
+            case 1: /* Media */
+                if (g_str_has_prefix(icon, "image") || g_str_has_prefix(icon, "video") || g_str_has_prefix(icon, "audio"))
+                    type_match = TRUE;
+                break;
+            case 2: /* Document */
+                if (g_str_has_prefix(icon, "text") || strstr(icon, "document") || strstr(icon, "pdf") || strstr(icon, "office"))
+                    type_match = TRUE;
+                break;
+            case 3: /* Folder */
+                if (is_dir)
+                    type_match = TRUE;
+                break;
+            case 4: /* Apps */
+                if (strstr(icon, "executable") || g_str_has_suffix(name, ".AppImage") || g_str_has_suffix(name, ".deb") || g_str_has_suffix(name, ".exe") || g_str_has_suffix(name, ".sh"))
+                    type_match = TRUE;
+                break;
+            case 5: /* Archive */
+                if (strstr(icon, "archive") || strstr(icon, "zip") || strstr(icon, "tar") || strstr(icon, "compressed") || g_str_has_suffix(name, ".rar") || g_str_has_suffix(name, ".7z"))
+                    type_match = TRUE;
+                break;
+        }
+        if (!type_match) return FALSE;
+    }
+    
     if (!self->filter_string || self->filter_string[0] == '\0') return TRUE;
 
     char *name_lower   = g_utf8_casefold(name, -1);

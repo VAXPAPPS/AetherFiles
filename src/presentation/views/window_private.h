@@ -48,6 +48,7 @@ struct _AetherWindow {
     GtkCustomFilter    *name_filter;
     GtkCustomSorter    *sorter;
     char               *filter_string;
+    int                 search_filter_type; // 0=All, 1=Media, 2=Doc, 3=Folder, 4=Apps, 5=Archive
 
     int     sort_mode;
     gboolean sort_asc;
@@ -149,6 +150,8 @@ void on_btn_back_clicked(GtkButton *btn, gpointer user_data);
 void on_btn_fwd_clicked(GtkButton *btn, gpointer user_data);
 void on_view_switched(GtkButton *btn, gpointer user_data);
 void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
+void on_search_filter_changed(GtkDropDown *dropdown, GParamSpec *pspec, gpointer user_data);
+void on_search_mode_toggled(GObject *object, GParamSpec *pspec, gpointer user_data);
 void tab_session_free_fields(AetherTabSession *s);
 void tab_session_save(AetherWindow *self, int idx);
 void tab_session_restore(AetherWindow *self, int idx);

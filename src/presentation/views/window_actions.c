@@ -507,3 +507,19 @@ void on_search_changed(GtkSearchEntry *entry, gpointer user_data) {
         gtk_filter_changed(GTK_FILTER(self->name_filter), GTK_FILTER_CHANGE_DIFFERENT);
 }
 
+void on_search_filter_changed(GtkDropDown *dropdown, GParamSpec *pspec, gpointer user_data) {
+    (void)pspec;
+    AetherWindow *self = AETHER_WINDOW(user_data);
+    self->search_filter_type = gtk_drop_down_get_selected(dropdown);
+    if (self->name_filter)
+        gtk_filter_changed(GTK_FILTER(self->name_filter), GTK_FILTER_CHANGE_DIFFERENT);
+}
+
+void on_search_mode_toggled(GObject *object, GParamSpec *pspec, gpointer user_data) {
+    (void)object;
+    (void)pspec;
+    AetherWindow *self = AETHER_WINDOW(user_data);
+    if (self->name_filter)
+        gtk_filter_changed(GTK_FILTER(self->name_filter), GTK_FILTER_CHANGE_DIFFERENT);
+}
+
