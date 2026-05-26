@@ -283,12 +283,41 @@ GdkContentProvider *on_drag_prepare(GtkDragSource *source, double x, double y,
     if (!item || !AETHER_IS_FILE_ENTITY(item)) return NULL;
     
     AetherFileEntity *entity = AETHER_FILE_ENTITY(item);
-    const char *path = aether_file_entity_get_path(entity);
-    if (!path) return NULL;
+    const char *dragged_path = aether_file_entity_get_path(entity);
+    if (!dragged_path) return NULL;
     
-    GFile *file = g_file_new_for_path(path);
+    GtkWidget *child = gtk_list_item_get_child(list_item);
+    GtkWidget *win_widget = child ? gtk_widget_get_ancestor(child, AETHER_TYPE_WINDOW) : NULL;
+    
     GSList *files = NULL;
-    files = g_slist_append(files, file);
+    gboolean used_selection = FALSE;
+    
+    if (win_widget) {
+        AetherWindow *win = AETHER_WINDOW(win_widget);
+        GStrv paths = aether_window_get_selected_paths(win);
+        if (paths) {
+            gboolean dragged_is_selected = FALSE;
+            for (int i = 0; paths[i] != NULL; i++) {
+                if (g_strcmp0(paths[i], dragged_path) == 0) {
+                    dragged_is_selected = TRUE;
+                    break;
+                }
+            }
+            
+            if (dragged_is_selected) {
+                used_selection = TRUE;
+                for (int i = 0; paths[i] != NULL; i++) {
+                    files = g_slist_prepend(files, g_file_new_for_path(paths[i]));
+                }
+                files = g_slist_reverse(files);
+            }
+            g_strfreev(paths);
+        }
+    }
+    
+    if (!used_selection) {
+        files = g_slist_append(files, g_file_new_for_path(dragged_path));
+    }
     
     GdkFileList *file_list = gdk_file_list_new_from_list(files);
     GValue value = G_VALUE_INIT;
@@ -298,6 +327,7 @@ GdkContentProvider *on_drag_prepare(GtkDragSource *source, double x, double y,
     GdkContentProvider *provider = gdk_content_provider_new_for_value(&value);
     g_value_unset(&value);
     g_slist_free_full(files, g_object_unref);
+    return provider;
     
     return provider;
 }
@@ -347,7 +377,7 @@ gboolean on_item_drop(GtkDropTarget *target, const GValue *value, double x, doub
         g_free(basename);
     }
     g_object_unref(dest_dir);
-    g_slist_free_full(files, g_object_unref);
+    g_slist_free(files);
     
     GtkWidget *box = gtk_list_item_get_child(list_item);
     GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(box));
