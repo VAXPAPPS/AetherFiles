@@ -20,7 +20,7 @@ static void aether_bluetooth_share_dialog_finalize(GObject *object) {
     G_OBJECT_CLASS(aether_bluetooth_share_dialog_parent_class)->finalize(object);
 }
 
-static void send_system_notification(const char *title, const char *body, const char *icon_name) {
+static void send_system_notification_with_id(const char *id, const char *title, const char *body, const char *icon_name) {
     GApplication *app = g_application_get_default();
     if (!app) return;
 
@@ -33,9 +33,7 @@ static void send_system_notification(const char *title, const char *body, const 
         g_object_unref(icon);
     }
 
-    char *id = g_strdup_printf("bluetooth-share-%ld", g_get_real_time());
     g_application_send_notification(app, id, notification);
-    g_free(id);
     g_object_unref(notification);
 }
 
@@ -44,7 +42,23 @@ typedef struct {
     int successful;
     int failed;
     char *device_name;
+    char *notification_id;
 } ShareContext;
+
+static void on_transfer_progress_cb(const char *status, guint64 transferred, guint64 size, gpointer user_data) {
+    ShareContext *ctx = (ShareContext *)user_data;
+    
+    if (g_strcmp0(status, "active") == 0 || transferred > 0) {
+        int percent = size > 0 ? (int)((transferred * 100) / size) : 0;
+        char *body = g_strdup_printf("Sending item to %s... (%d%%)", ctx->device_name, percent);
+        send_system_notification_with_id(ctx->notification_id, "Bluetooth Transfer", body, "bluetooth-active-symbolic");
+        g_free(body);
+    } else if (g_strcmp0(status, "queued") == 0) {
+        char *body = g_strdup_printf("Waiting for %s to accept...", ctx->device_name);
+        send_system_notification_with_id(ctx->notification_id, "Bluetooth Transfer", body, "bluetooth-active-symbolic");
+        g_free(body);
+    }
+}
 
 static void on_file_sent(GObject *source, GAsyncResult *res, gpointer user_data) {
     ShareContext *ctx = (ShareContext *)user_data;
@@ -65,11 +79,12 @@ static void on_file_sent(GObject *source, GAsyncResult *res, gpointer user_data)
         if (ctx->failed == 0) {
             body = g_strdup_printf("Successfully sent %d file(s) to %s.", ctx->successful, ctx->device_name);
         } else {
-            body = g_strdup_printf("Transfer complete: %d sent, %d failed to %s.", ctx->successful, ctx->failed, ctx->device_name);
+            body = g_strdup_printf("Finished with errors: %d sent, %d failed to %s.", ctx->successful, ctx->failed, ctx->device_name);
         }
-        send_system_notification("Bluetooth Transfer Complete", body, "bluetooth-active-symbolic");
+        send_system_notification_with_id(ctx->notification_id, "Finished sending item(s)", body, "bluetooth-active-symbolic");
         g_free(body);
         g_free(ctx->device_name);
+        g_free(ctx->notification_id);
         g_free(ctx);
     }
 }
@@ -91,13 +106,14 @@ static void on_device_selected(GtkListBox *box, GtkListBoxRow *row, AetherBlueto
             ctx->successful = 0;
             ctx->failed = 0;
             ctx->device_name = g_strdup(name);
+            ctx->notification_id = g_strdup_printf("bluetooth-share-%ld", g_get_real_time());
 
-            char *msg = g_strdup_printf("Sending %d file(s) to %s...", total_files, name);
-            send_system_notification("Bluetooth Transfer Started", msg, "bluetooth-active-symbolic");
+            char *msg = g_strdup_printf("Starting transfer to %s...", name);
+            send_system_notification_with_id(ctx->notification_id, "Bluetooth Transfer", msg, "bluetooth-active-symbolic");
             g_free(msg);
 
             for (int i = 0; self->files_to_share[i] != NULL; i++) {
-                aether_bluez_dbus_manager_send_file_async(self->dbus_manager, address, self->files_to_share[i], on_file_sent, ctx);
+                aether_bluez_dbus_manager_send_file_async(self->dbus_manager, address, self->files_to_share[i], on_transfer_progress_cb, ctx, on_file_sent, ctx);
             }
         }
     }

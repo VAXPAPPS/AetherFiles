@@ -119,6 +119,11 @@ typedef struct {
     AetherBluezDbusManager *manager;
     guint subscription_id;
     GTask *task;
+    AetherBluezProgressCallback progress_cb;
+    gpointer progress_user_data;
+    guint64 size;
+    guint64 transferred;
+    char *status;
 } ObexTransferData;
 
 static void obex_transfer_data_free(ObexTransferData *data) {
@@ -127,6 +132,7 @@ static void obex_transfer_data_free(ObexTransferData *data) {
     }
     g_free(data->device_address);
     g_free(data->file_path);
+    g_free(data->status);
     g_clear_object(&data->manager);
     g_free(data);
 }
@@ -148,7 +154,25 @@ static void on_transfer_properties_changed(GDBusConnection *connection,
 
     if (g_strcmp0(iface, "org.bluez.obex.Transfer1") == 0) {
         const gchar *status = NULL;
-        if (g_variant_lookup(changed_properties, "Status", "&s", &status)) {
+        guint64 transferred = 0;
+        guint64 size = 0;
+
+        gboolean has_status = g_variant_lookup(changed_properties, "Status", "&s", &status);
+        gboolean has_transferred = g_variant_lookup(changed_properties, "Transferred", "t", &transferred);
+        gboolean has_size = g_variant_lookup(changed_properties, "Size", "t", &size);
+
+        if (has_status) {
+            g_free(transfer->status);
+            transfer->status = g_strdup(status);
+        }
+        if (has_transferred) transfer->transferred = transferred;
+        if (has_size) transfer->size = size;
+
+        if (transfer->progress_cb && (has_status || has_transferred)) {
+            transfer->progress_cb(transfer->status, transfer->transferred, transfer->size, transfer->progress_user_data);
+        }
+
+        if (has_status && status != NULL) {
             if (g_strcmp0(status, "complete") == 0) {
                 GTask *t = transfer->task;
                 transfer->task = NULL;
@@ -178,7 +202,8 @@ static void on_obex_send_file_ready(GObject *source_object, GAsyncResult *res, g
     }
 
     const char *transfer_path = NULL;
-    g_variant_get(result, "(&o@a{sv})", &transfer_path, NULL);
+    GVariant *properties = NULL;
+    g_variant_get(result, "(&o@a{sv})", &transfer_path, &properties);
 
     transfer->task = task;
     
@@ -194,6 +219,20 @@ static void on_obex_send_file_ready(GObject *source_object, GAsyncResult *res, g
         transfer,
         NULL
     );
+
+    if (properties) {
+        const gchar *status = NULL;
+        if (g_variant_lookup(properties, "Status", "&s", &status)) {
+            transfer->status = g_strdup(status);
+        }
+        g_variant_lookup(properties, "Size", "t", &transfer->size);
+        g_variant_lookup(properties, "Transferred", "t", &transfer->transferred);
+        
+        if (transfer->progress_cb) {
+            transfer->progress_cb(transfer->status, transfer->transferred, transfer->size, transfer->progress_user_data);
+        }
+        g_variant_unref(properties);
+    }
 
     g_variant_unref(result);
 }
@@ -232,7 +271,7 @@ static void on_obex_session_ready(GObject *source_object, GAsyncResult *res, gpo
     g_variant_unref(result);
 }
 
-void aether_bluez_dbus_manager_send_file_async(AetherBluezDbusManager *self, const char *device_address, const char *file_path, GAsyncReadyCallback callback, gpointer user_data) {
+void aether_bluez_dbus_manager_send_file_async(AetherBluezDbusManager *self, const char *device_address, const char *file_path, AetherBluezProgressCallback progress_callback, gpointer progress_user_data, GAsyncReadyCallback callback, gpointer user_data) {
     GTask *task = g_task_new(self, NULL, callback, user_data);
     
     if (!self->session_bus) {
@@ -245,6 +284,9 @@ void aether_bluez_dbus_manager_send_file_async(AetherBluezDbusManager *self, con
     transfer->device_address = g_strdup(device_address);
     transfer->file_path = g_strdup(file_path);
     transfer->manager = g_object_ref(self);
+    transfer->progress_cb = progress_callback;
+    transfer->progress_user_data = progress_user_data;
+    transfer->size = 0;
     g_task_set_task_data(task, transfer, (GDestroyNotify)obex_transfer_data_free);
 
     /* Create OBEX Session */
