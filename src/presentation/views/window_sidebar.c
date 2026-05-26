@@ -138,6 +138,126 @@ static gboolean on_sidebar_row_drop_accept(GtkDropTarget *target, GdkDrop *drop,
     return dest_path != NULL;
 }
 
+typedef struct {
+    GPtrArray *deb_paths;
+    AetherWindow *win;
+} InstallData;
+
+static void on_install_process_exited(GObject *source_object, GAsyncResult *res, gpointer user_data) {
+    InstallData *data = user_data;
+    GSubprocess *proc = G_SUBPROCESS(source_object);
+    GError *err = NULL;
+    g_subprocess_wait_finish(proc, res, &err);
+    if (err) {
+        g_printerr("Install failed: %s\n", err->message);
+        g_error_free(err);
+    } else {
+        if (g_subprocess_get_if_exited(proc) && g_subprocess_get_exit_status(proc) == 0) {
+            g_print("Installation successful!\n");
+            if (data && data->win && data->win->app_repo) {
+                aether_app_repository_load_apps(data->win->app_repo);
+            }
+        } else {
+            g_printerr("Installation failed or exited with error.\n");
+        }
+    }
+    
+    if (data) {
+        g_ptr_array_free(data->deb_paths, TRUE);
+        g_free(data);
+    }
+    g_object_unref(proc);
+}
+
+static void on_install_password_submit(GtkWidget *widget, gpointer user_data) {
+    (void)user_data;
+    GtkWidget *dialog = gtk_widget_get_ancestor(widget, GTK_TYPE_WINDOW);
+    GtkWidget *entry = g_object_get_data(G_OBJECT(dialog), "pwd-entry");
+    InstallData *data = g_object_get_data(G_OBJECT(dialog), "install-data");
+    
+    const char *pwd = gtk_editable_get_text(GTK_EDITABLE(entry));
+    if (!pwd || strlen(pwd) == 0) return;
+    
+    GPtrArray *cmd = g_ptr_array_new_with_free_func(g_free);
+    g_ptr_array_add(cmd, g_strdup("sudo"));
+    g_ptr_array_add(cmd, g_strdup("-S"));
+    g_ptr_array_add(cmd, g_strdup("apt-get"));
+    g_ptr_array_add(cmd, g_strdup("install"));
+    g_ptr_array_add(cmd, g_strdup("-y"));
+    for (guint i = 0; i < data->deb_paths->len; i++) {
+        g_ptr_array_add(cmd, g_strdup(g_ptr_array_index(data->deb_paths, i)));
+    }
+    g_ptr_array_add(cmd, NULL);
+    
+    GError *err = NULL;
+    GSubprocess *proc = g_subprocess_newv((const char * const *)cmd->pdata,
+        G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE,
+        &err);
+        
+    if (proc) {
+        char *pwd_nl = g_strdup_printf("%s\n", pwd);
+        GOutputStream *stdin_stream = g_subprocess_get_stdin_pipe(proc);
+        g_output_stream_write_all(stdin_stream, pwd_nl, strlen(pwd_nl), NULL, NULL, NULL);
+        g_output_stream_close(stdin_stream, NULL, NULL);
+        g_free(pwd_nl);
+        
+        g_subprocess_wait_async(proc, NULL, on_install_process_exited, data);
+    } else {
+        g_printerr("Failed to spawn sudo: %s\n", err->message);
+        g_error_free(err);
+        g_ptr_array_free(data->deb_paths, TRUE);
+        g_free(data);
+    }
+    
+    g_ptr_array_free(cmd, TRUE);
+    gtk_window_destroy(GTK_WINDOW(dialog));
+}
+
+static void show_install_auth_dialog(AetherWindow *win, GPtrArray *deb_paths) {
+    GtkWidget *dialog = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dialog), "Authentication Required");
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(win));
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 300, 150);
+    
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(provider, "window { background-color: rgba(0, 0, 0, 0.3); }", -1);
+    gtk_style_context_add_provider(gtk_widget_get_style_context(dialog), GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+    
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_start(box, 16);
+    gtk_widget_set_margin_end(box, 16);
+    gtk_widget_set_margin_top(box, 16);
+    gtk_widget_set_margin_bottom(box, 16);
+    
+    GtkWidget *lbl = gtk_label_new("Enter administrator password to install packages:");
+    gtk_label_set_wrap(GTK_LABEL(lbl), TRUE);
+    
+    GtkWidget *entry = gtk_password_entry_new();
+    gtk_password_entry_set_show_peek_icon(GTK_PASSWORD_ENTRY(entry), TRUE);
+    
+    GtkWidget *btn = gtk_button_new_with_label("Install");
+    gtk_widget_add_css_class(btn, "suggested-action");
+    
+    InstallData *data = g_new0(InstallData, 1);
+    data->deb_paths = deb_paths;
+    data->win = win;
+    
+    g_object_set_data(G_OBJECT(dialog), "pwd-entry", entry);
+    g_object_set_data(G_OBJECT(dialog), "install-data", data);
+    
+    g_signal_connect(btn, "clicked", G_CALLBACK(on_install_password_submit), NULL);
+    g_signal_connect(entry, "activate", G_CALLBACK(on_install_password_submit), NULL);
+    
+    gtk_box_append(GTK_BOX(box), lbl);
+    gtk_box_append(GTK_BOX(box), entry);
+    gtk_box_append(GTK_BOX(box), btn);
+    
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+    gtk_window_present(GTK_WINDOW(dialog));
+}
+
 static gboolean on_sidebar_row_drop(GtkDropTarget *target, const GValue *value, double x, double y, gpointer user_data) {
     (void)target; (void)x; (void)y;
     GtkWidget *row = GTK_WIDGET(user_data);
@@ -153,6 +273,35 @@ static gboolean on_sidebar_row_drop(GtkDropTarget *target, const GValue *value, 
     gboolean success = TRUE;
     
     gboolean is_trash = g_strcmp0(dest_path, "trash:///") == 0;
+    gboolean is_apps  = g_strcmp0(dest_path, "apps:///") == 0;
+    
+    if (is_apps) {
+        GPtrArray *deb_paths = g_ptr_array_new_with_free_func(g_free);
+        for (GSList *l = files; l != NULL; l = l->next) {
+            GFile *src = G_FILE(l->data);
+            char *path = g_file_get_path(src);
+            if (path && g_str_has_suffix(path, ".deb")) {
+                g_ptr_array_add(deb_paths, path);
+            } else {
+                g_free(path);
+            }
+        }
+        
+        if (deb_paths->len > 0) {
+            GtkWidget *win_widget = gtk_widget_get_ancestor(row, AETHER_TYPE_WINDOW);
+            if (win_widget) {
+                show_install_auth_dialog(AETHER_WINDOW(win_widget), deb_paths);
+            } else {
+                g_ptr_array_free(deb_paths, TRUE);
+            }
+        } else {
+            g_ptr_array_free(deb_paths, TRUE);
+        }
+        
+        g_object_unref(dest_dir);
+        g_slist_free(files);
+        return success;
+    }
     
     for (GSList *l = files; l != NULL; l = l->next) {
         GFile *src = G_FILE(l->data);
