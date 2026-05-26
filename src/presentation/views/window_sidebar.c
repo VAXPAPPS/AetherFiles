@@ -221,8 +221,8 @@ static void show_install_auth_dialog(AetherWindow *win, GPtrArray *deb_paths) {
     gtk_window_set_default_size(GTK_WINDOW(dialog), 300, 150);
     
     GtkCssProvider *provider = gtk_css_provider_new();
-    gtk_css_provider_load_from_data(provider, "window { background-color: rgba(0, 0, 0, 0.3); }", -1);
-    gtk_style_context_add_provider(gtk_widget_get_style_context(dialog), GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    gtk_css_provider_load_from_string(provider, "window { background-color: rgba(0, 0, 0, 0.3); }");
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(provider);
     
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
