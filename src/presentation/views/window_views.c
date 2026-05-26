@@ -1,5 +1,33 @@
 #include "window_private.h"
 #include <glib/gi18n.h>
+#include "../../data/thumbnail_manager.h"
+
+static void on_thumbnail_updated(AetherFileEntity *e, gpointer user_data) {
+    GtkStack *stack = GTK_STACK(user_data);
+    GtkWidget *picture = gtk_stack_get_child_by_name(stack, "thumbnail");
+    GdkTexture *tex = aether_file_entity_get_thumbnail(e);
+    if (tex && picture) {
+        gtk_picture_set_paintable(GTK_PICTURE(picture), GDK_PAINTABLE(tex));
+        gtk_stack_set_visible_child_name(stack, "thumbnail");
+    }
+}
+
+static void on_thumbnail_ready(GObject *source, GAsyncResult *res, gpointer user_data) {
+    AetherThumbnailManager *tm = AETHER_THUMBNAIL_MANAGER(source);
+    AetherFileEntity *e = AETHER_FILE_ENTITY(user_data);
+    
+    GError *err = NULL;
+    GdkTexture *texture = aether_thumbnail_manager_get_thumbnail_finish(tm, res, &err);
+    if (texture) {
+        aether_file_entity_set_thumbnail(e, texture);
+        g_object_unref(texture);
+    } else {
+        if (err) g_error_free(err);
+    }
+    
+    aether_file_entity_set_is_loading_thumbnail(e, FALSE);
+    g_object_unref(e);
+}
 
 void setup_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
@@ -10,9 +38,18 @@ void setup_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     gtk_widget_set_margin_start(box, 6);
     gtk_widget_set_margin_end(box, 6);
 
+    GtkWidget *stack = gtk_stack_new();
+    gtk_widget_set_halign(stack, GTK_ALIGN_CENTER);
+
     GtkWidget *icon = gtk_image_new();
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 64);
-    gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
+    gtk_stack_add_named(GTK_STACK(stack), icon, "icon");
+    
+    GtkWidget *picture = gtk_picture_new();
+    gtk_widget_set_size_request(picture, 64, 64);
+    gtk_picture_set_can_shrink(GTK_PICTURE(picture), TRUE);
+    gtk_picture_set_content_fit(GTK_PICTURE(picture), GTK_CONTENT_FIT_FILL);
+    gtk_stack_add_named(GTK_STACK(stack), picture, "thumbnail");
 
     GtkWidget *label = gtk_label_new("");
     gtk_label_set_wrap(GTK_LABEL(label), TRUE);
@@ -23,7 +60,7 @@ void setup_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     gtk_label_set_justify(GTK_LABEL(label), GTK_JUSTIFY_CENTER);
     gtk_widget_set_halign(label, GTK_ALIGN_CENTER);
 
-    gtk_box_append(GTK_BOX(box), icon);
+    gtk_box_append(GTK_BOX(box), stack);
     gtk_box_append(GTK_BOX(box), label);
 
     GtkGesture *g = gtk_gesture_click_new();
@@ -47,22 +84,64 @@ void setup_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
 void bind_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     GtkWidget *box   = gtk_list_item_get_child(li);
     if (!box) return;
-    GtkWidget *icon  = gtk_widget_get_first_child(box);
-    GtkWidget *label = gtk_widget_get_next_sibling(icon);
+    GtkWidget *stack = gtk_widget_get_first_child(box);
+    GtkWidget *label = gtk_widget_get_next_sibling(stack);
+    GtkWidget *icon = gtk_stack_get_child_by_name(GTK_STACK(stack), "icon");
+    GtkWidget *picture = gtk_stack_get_child_by_name(GTK_STACK(stack), "thumbnail");
     gpointer   item  = gtk_list_item_get_item(li);
     if (!item || !AETHER_IS_FILE_ENTITY(item)) return;
 
     AetherFileEntity *e = AETHER_FILE_ENTITY(item);
-    gtk_image_set_from_icon_name(GTK_IMAGE(icon), aether_file_entity_get_icon_name(e));
+    
+    gulong sig_id = g_signal_connect(e, "thumbnail-updated", G_CALLBACK(on_thumbnail_updated), stack);
+    g_object_set_data(G_OBJECT(stack), "thumb-sig-id", GUINT_TO_POINTER(sig_id));
+    g_object_set_data(G_OBJECT(stack), "thumb-entity", e);
+    
+    GdkTexture *thumbnail = aether_file_entity_get_thumbnail(e);
+    if (thumbnail) {
+        gtk_picture_set_paintable(GTK_PICTURE(picture), GDK_PAINTABLE(thumbnail));
+        gtk_stack_set_visible_child_name(GTK_STACK(stack), "thumbnail");
+    } else {
+        gtk_image_set_from_icon_name(GTK_IMAGE(icon), aether_file_entity_get_icon_name(e));
+        gtk_stack_set_visible_child_name(GTK_STACK(stack), "icon");
+        
+        if (!aether_file_entity_get_is_loading_thumbnail(e)) {
+            const char *icon_name = aether_file_entity_get_icon_name(e);
+            if (g_str_has_prefix(icon_name, "image") || g_str_has_prefix(icon_name, "video")) {
+                aether_file_entity_set_is_loading_thumbnail(e, TRUE);
+                char *mime = g_strdup_printf("%s/generic", g_str_has_prefix(icon_name, "image") ? "image" : "video");
+                aether_thumbnail_manager_get_thumbnail_async(
+                    aether_thumbnail_manager_get_default(), 
+                    aether_file_entity_get_uri(e), 
+                    mime, NULL, on_thumbnail_ready, g_object_ref(e)
+                );
+                g_free(mime);
+            }
+        }
+    }
+    
     gtk_label_set_text(GTK_LABEL(label), aether_file_entity_get_name(e));
 }
 
 void unbind_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     GtkWidget *box   = gtk_list_item_get_child(li);
     if (!box) return;
-    GtkWidget *icon  = gtk_widget_get_first_child(box);
-    GtkWidget *label = gtk_widget_get_next_sibling(icon);
+    GtkWidget *stack = gtk_widget_get_first_child(box);
+    GtkWidget *label = gtk_widget_get_next_sibling(stack);
+    GtkWidget *icon = gtk_stack_get_child_by_name(GTK_STACK(stack), "icon");
+    GtkWidget *picture = gtk_stack_get_child_by_name(GTK_STACK(stack), "thumbnail");
+    
+    AetherFileEntity *e = g_object_get_data(G_OBJECT(stack), "thumb-entity");
+    gulong sig_id = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(stack), "thumb-sig-id"));
+    if (e && sig_id > 0) {
+        g_signal_handler_disconnect(e, sig_id);
+    }
+    g_object_set_data(G_OBJECT(stack), "thumb-sig-id", NULL);
+    g_object_set_data(G_OBJECT(stack), "thumb-entity", NULL);
+    
     gtk_image_clear(GTK_IMAGE(icon));
+    gtk_picture_set_paintable(GTK_PICTURE(picture), NULL);
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "icon");
     gtk_label_set_text(GTK_LABEL(label), "");
 }
 
@@ -73,13 +152,21 @@ void setup_list_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     gtk_widget_set_margin_top(box, 4);
     gtk_widget_set_margin_bottom(box, 4);
 
+    GtkWidget *stack = gtk_stack_new();
     GtkWidget *icon  = gtk_image_new();
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 20);
+    gtk_stack_add_named(GTK_STACK(stack), icon, "icon");
+    
+    GtkWidget *picture = gtk_picture_new();
+    gtk_widget_set_size_request(picture, 20, 20);
+    gtk_picture_set_can_shrink(GTK_PICTURE(picture), TRUE);
+    gtk_picture_set_content_fit(GTK_PICTURE(picture), GTK_CONTENT_FIT_FILL);
+    gtk_stack_add_named(GTK_STACK(stack), picture, "thumbnail");
     GtkWidget *label = gtk_label_new("");
     gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
     gtk_widget_set_hexpand(label, TRUE);
 
-    gtk_box_append(GTK_BOX(box), icon);
+    gtk_box_append(GTK_BOX(box), stack);
     gtk_box_append(GTK_BOX(box), label);
 
     GtkGesture *g = gtk_gesture_click_new();
@@ -103,22 +190,64 @@ void setup_list_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
 void bind_list_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     GtkWidget *box   = gtk_list_item_get_child(li);
     if (!box) return;
-    GtkWidget *icon  = gtk_widget_get_first_child(box);
-    GtkWidget *label = gtk_widget_get_next_sibling(icon);
+    GtkWidget *stack = gtk_widget_get_first_child(box);
+    GtkWidget *label = gtk_widget_get_next_sibling(stack);
+    GtkWidget *icon = gtk_stack_get_child_by_name(GTK_STACK(stack), "icon");
+    GtkWidget *picture = gtk_stack_get_child_by_name(GTK_STACK(stack), "thumbnail");
     gpointer   item  = gtk_list_item_get_item(li);
     if (!item || !AETHER_IS_FILE_ENTITY(item)) return;
 
     AetherFileEntity *e = AETHER_FILE_ENTITY(item);
-    gtk_image_set_from_icon_name(GTK_IMAGE(icon), aether_file_entity_get_icon_name(e));
+    
+    gulong sig_id = g_signal_connect(e, "thumbnail-updated", G_CALLBACK(on_thumbnail_updated), stack);
+    g_object_set_data(G_OBJECT(stack), "thumb-sig-id", GUINT_TO_POINTER(sig_id));
+    g_object_set_data(G_OBJECT(stack), "thumb-entity", e);
+    
+    GdkTexture *thumbnail = aether_file_entity_get_thumbnail(e);
+    if (thumbnail) {
+        gtk_picture_set_paintable(GTK_PICTURE(picture), GDK_PAINTABLE(thumbnail));
+        gtk_stack_set_visible_child_name(GTK_STACK(stack), "thumbnail");
+    } else {
+        gtk_image_set_from_icon_name(GTK_IMAGE(icon), aether_file_entity_get_icon_name(e));
+        gtk_stack_set_visible_child_name(GTK_STACK(stack), "icon");
+        
+        if (!aether_file_entity_get_is_loading_thumbnail(e)) {
+            const char *icon_name = aether_file_entity_get_icon_name(e);
+            if (g_str_has_prefix(icon_name, "image") || g_str_has_prefix(icon_name, "video")) {
+                aether_file_entity_set_is_loading_thumbnail(e, TRUE);
+                char *mime = g_strdup_printf("%s/generic", g_str_has_prefix(icon_name, "image") ? "image" : "video");
+                aether_thumbnail_manager_get_thumbnail_async(
+                    aether_thumbnail_manager_get_default(), 
+                    aether_file_entity_get_uri(e), 
+                    mime, NULL, on_thumbnail_ready, g_object_ref(e)
+                );
+                g_free(mime);
+            }
+        }
+    }
+    
     gtk_label_set_text(GTK_LABEL(label), aether_file_entity_get_name(e));
 }
 
 void unbind_list_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     GtkWidget *box   = gtk_list_item_get_child(li);
     if (!box) return;
-    GtkWidget *icon  = gtk_widget_get_first_child(box);
-    GtkWidget *label = gtk_widget_get_next_sibling(icon);
+    GtkWidget *stack = gtk_widget_get_first_child(box);
+    GtkWidget *label = gtk_widget_get_next_sibling(stack);
+    GtkWidget *icon = gtk_stack_get_child_by_name(GTK_STACK(stack), "icon");
+    GtkWidget *picture = gtk_stack_get_child_by_name(GTK_STACK(stack), "thumbnail");
+    
+    AetherFileEntity *e = g_object_get_data(G_OBJECT(stack), "thumb-entity");
+    gulong sig_id = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(stack), "thumb-sig-id"));
+    if (e && sig_id > 0) {
+        g_signal_handler_disconnect(e, sig_id);
+    }
+    g_object_set_data(G_OBJECT(stack), "thumb-sig-id", NULL);
+    g_object_set_data(G_OBJECT(stack), "thumb-entity", NULL);
+    
     gtk_image_clear(GTK_IMAGE(icon));
+    gtk_picture_set_paintable(GTK_PICTURE(picture), NULL);
+    gtk_stack_set_visible_child_name(GTK_STACK(stack), "icon");
     gtk_label_set_text(GTK_LABEL(label), "");
 }
 

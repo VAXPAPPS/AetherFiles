@@ -7,6 +7,7 @@ aetherfiles_sources = [
   'data/gio_file_repository.c',
   'data/drive_manager.c',
   'data/app_repository.c',
+  'data/thumbnail_manager.c',
   'presentation/application.c',
   'presentation/views/window.c',
   'presentation/views/window_sidebar.c',
