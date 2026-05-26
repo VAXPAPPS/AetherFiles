@@ -1,5 +1,6 @@
 #include "application.h"
 #include "views/window.h"
+#include "views/bluetooth_share_dialog.h"
 #include "controllers/clipboard_controller.h"
 #include "../data/archive_manager.h"
 #include <gio/gio.h>
@@ -411,6 +412,23 @@ static void on_restore_all_action(GSimpleAction *action, GVariant *parameter, gp
     aether_window_reload(win);
 }
 
+static void on_share_bluetooth_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    AetherApplication *app = AETHER_APPLICATION(user_data);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+    
+    GStrv paths = aether_window_get_selected_paths(win);
+    if (!paths || !paths[0]) {
+        if (paths) g_strfreev(paths);
+        return;
+    }
+    
+    AetherBluetoothShareDialog *dialog = aether_bluetooth_share_dialog_new(GTK_WINDOW(win), paths);
+    gtk_window_present(GTK_WINDOW(dialog));
+    g_strfreev(paths);
+}
+
 /* ── properties ── */
 static void on_properties_response(GtkDialog *d, int response_id, gpointer ud) {
     (void)response_id; (void)ud;
@@ -544,6 +562,7 @@ static void aether_application_init(AetherApplication *app) {
         { "delete-permanently", G_CALLBACK(on_delete_permanently_action), NULL },
         { "empty-trash",    G_CALLBACK(on_empty_trash_action),    NULL },
         { "restore-all",    G_CALLBACK(on_restore_all_action),    NULL },
+        { "share-bluetooth",G_CALLBACK(on_share_bluetooth_action),NULL },
         { "properties",     G_CALLBACK(on_properties_action),     G_VARIANT_TYPE_STRING },
         { "set_background", G_CALLBACK(on_set_background_action), G_VARIANT_TYPE_STRING },
         { "extract",        G_CALLBACK(on_extract_action),        G_VARIANT_TYPE_STRING },

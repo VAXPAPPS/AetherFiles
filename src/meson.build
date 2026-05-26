@@ -3,12 +3,14 @@ aetherfiles_sources = [
   'domain/file_entity.c',
   'domain/drive_entity.c',
   'domain/app_entity.c',
+  'domain/bluetooth_device_entity.c',
   'domain/file_repository.c',
   'data/gio_file_repository.c',
   'data/drive_manager.c',
   'data/app_repository.c',
   'data/thumbnail_manager.c',
   'data/archive_manager.c',
+  'data/bluez_dbus_manager.c',
   'presentation/application.c',
   'presentation/views/window.c',
   'presentation/views/window_sidebar.c',
@@ -19,6 +21,7 @@ aetherfiles_sources = [
   'presentation/views/window_context_menu.c',
   'presentation/views/window_apps.c',
   'presentation/views/app_uninstall_dialog.c',
+  'presentation/views/bluetooth_share_dialog.c',
   'presentation/controllers/clipboard_controller.c',
 ]
 

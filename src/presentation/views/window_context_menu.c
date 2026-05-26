@@ -122,6 +122,10 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
 
         /* Manage */
         GMenu *s3 = g_menu_new();
+        mi = g_menu_item_new("Share via Bluetooth", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.share-bluetooth", NULL);
+        g_menu_append_item(s3, mi); g_object_unref(mi);
+
         mi = g_menu_item_new("Rename…", NULL);
         g_menu_item_set_action_and_target_value(mi, "app.rename-path", g_variant_new_string(path ? path : ""));
         g_menu_append_item(s3, mi); g_object_unref(mi);
