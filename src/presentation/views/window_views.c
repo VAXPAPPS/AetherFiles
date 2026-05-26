@@ -93,7 +93,7 @@ void bind_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
 
     AetherFileEntity *e = AETHER_FILE_ENTITY(item);
     
-    gulong sig_id = g_signal_connect(e, "thumbnail-updated", G_CALLBACK(on_thumbnail_updated), stack);
+    gulong sig_id = g_signal_connect_object(e, "thumbnail-updated", G_CALLBACK(on_thumbnail_updated), stack, 0);
     g_object_set_data(G_OBJECT(stack), "thumb-sig-id", GUINT_TO_POINTER(sig_id));
     g_object_set_data(G_OBJECT(stack), "thumb-entity", e);
     
@@ -199,7 +199,7 @@ void bind_list_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
 
     AetherFileEntity *e = AETHER_FILE_ENTITY(item);
     
-    gulong sig_id = g_signal_connect(e, "thumbnail-updated", G_CALLBACK(on_thumbnail_updated), stack);
+    gulong sig_id = g_signal_connect_object(e, "thumbnail-updated", G_CALLBACK(on_thumbnail_updated), stack, 0);
     g_object_set_data(G_OBJECT(stack), "thumb-sig-id", GUINT_TO_POINTER(sig_id));
     g_object_set_data(G_OBJECT(stack), "thumb-entity", e);
     
@@ -219,7 +219,7 @@ void bind_list_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
                 aether_thumbnail_manager_get_thumbnail_async(
                     aether_thumbnail_manager_get_default(), 
                     aether_file_entity_get_uri(e), 
-                    mime, NULL, on_thumbnail_ready, g_object_ref(e)
+                    mime, NULL, on_thumbnail_ready, g_object_ref(e)  
                 );
                 g_free(mime);
             }

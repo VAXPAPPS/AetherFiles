@@ -52,6 +52,49 @@ static char *get_thumbnail_path(const char *uri) {
     return thumb_path;
 }
 
+static void apply_film_strip(GdkPixbuf *pixbuf) {
+    if (!pixbuf) return;
+    int width = gdk_pixbuf_get_width(pixbuf);
+    int height = gdk_pixbuf_get_height(pixbuf);
+    int rowstride = gdk_pixbuf_get_rowstride(pixbuf);
+    int n_channels = gdk_pixbuf_get_n_channels(pixbuf);
+    guchar *pixels = gdk_pixbuf_get_pixels(pixbuf);
+    
+    int border_width = 20;
+    int hole_size = 10;
+    int hole_offset = 5;
+    int hole_period = 24;
+    
+    for (int y = 0; y < height; y++) {
+        guchar *row = pixels + y * rowstride;
+        
+        gboolean is_hole = FALSE;
+        int y_mod = y % hole_period;
+        if (y_mod >= 7 && y_mod < 7 + hole_size) {
+            is_hole = TRUE;
+        }
+        
+        for (int x = 0; x < width; x++) {
+            if (x < border_width || x >= width - border_width) {
+                guchar r = 15, g = 15, b = 15, a = 255;
+                
+                if (is_hole) {
+                    if ((x >= hole_offset && x < hole_offset + hole_size) || 
+                        (x >= width - border_width + hole_offset && x < width - border_width + hole_offset + hole_size)) {
+                        r = 240; g = 240; b = 240;
+                    }
+                }
+                
+                guchar *p = row + x * n_channels;
+                p[0] = r;
+                p[1] = g;
+                p[2] = b;
+                if (n_channels == 4) p[3] = a;
+            }
+        }
+    }
+}
+
 static GdkPixbuf *generate_video_thumbnail(const char *path) {
     /* Extract 1 frame at 10% or just the beginning */
     char *tmp_filename = g_strdup_printf("thumb_%p_%d.png", path, g_random_int());
@@ -72,6 +115,9 @@ static GdkPixbuf *generate_video_thumbnail(const char *path) {
     GdkPixbuf *pixbuf = NULL;
     if (success) {
         pixbuf = gdk_pixbuf_new_from_file_at_scale(tmp_path, 256, 256, TRUE, NULL);
+        if (pixbuf) {
+            apply_film_strip(pixbuf);
+        }
     }
     
     g_unlink(tmp_path);
