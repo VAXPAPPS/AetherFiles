@@ -131,6 +131,60 @@ gboolean is_bookmarked(const char *path) {
     return found;
 }
 
+static gboolean on_sidebar_row_drop_accept(GtkDropTarget *target, GdkDrop *drop, gpointer user_data) {
+    (void)target; (void)drop;
+    GtkWidget *row = GTK_WIDGET(user_data);
+    const char *dest_path = g_object_get_data(G_OBJECT(row), "path");
+    return dest_path != NULL;
+}
+
+static gboolean on_sidebar_row_drop(GtkDropTarget *target, const GValue *value, double x, double y, gpointer user_data) {
+    (void)target; (void)x; (void)y;
+    GtkWidget *row = GTK_WIDGET(user_data);
+    const char *dest_path = g_object_get_data(G_OBJECT(row), "path");
+    
+    if (!dest_path) return FALSE;
+    
+    GdkFileList *file_list = g_value_get_boxed(value);
+    if (!file_list) return FALSE;
+    
+    GSList *files = gdk_file_list_get_files(file_list);
+    GFile *dest_dir = g_file_new_for_path(dest_path);
+    gboolean success = TRUE;
+    
+    gboolean is_trash = g_strcmp0(dest_path, "trash:///") == 0;
+    
+    for (GSList *l = files; l != NULL; l = l->next) {
+        GFile *src = G_FILE(l->data);
+        GError *err = NULL;
+        
+        if (is_trash) {
+            g_file_trash(src, NULL, &err);
+        } else {
+            char *basename = g_file_get_basename(src);
+            GFile *dest_file = g_file_get_child(dest_dir, basename);
+            g_file_move(src, dest_file, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+            g_object_unref(dest_file);
+            g_free(basename);
+        }
+        
+        if (err) {
+            g_printerr("Sidebar DnD error: Error moving file %s: %s\n", dest_path, err->message);
+            g_error_free(err);
+            success = FALSE;
+        }
+    }
+    g_object_unref(dest_dir);
+    g_slist_free(files);
+    
+    GtkWidget *win_widget = gtk_widget_get_ancestor(row, AETHER_TYPE_WINDOW);
+    if (win_widget) {
+        aether_window_reload(AETHER_WINDOW(win_widget));
+    }
+    
+    return success;
+}
+
 GtkWidget *make_sidebar_row(const char *name, const char *icon_name) {
     GtkWidget *row = gtk_list_box_row_new();
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
@@ -148,6 +202,12 @@ GtkWidget *make_sidebar_row(const char *name, const char *icon_name) {
     gtk_box_append(GTK_BOX(box), icon);
     gtk_box_append(GTK_BOX(box), label);
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+    
+    GtkDropTarget *row_drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+    g_signal_connect(row_drop, "accept", G_CALLBACK(on_sidebar_row_drop_accept), row);
+    g_signal_connect(row_drop, "drop", G_CALLBACK(on_sidebar_row_drop), row);
+    gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(row_drop));
+    
     return row;
 }
 

@@ -101,6 +101,37 @@ void update_pathbar(AetherWindow *self) {
     g_object_unref(f);
 }
 
+typedef struct {
+    AetherWindow *window;
+    GtkMultiSelection *grid_sel;
+    GtkMultiSelection *list_sel;
+    GtkFilterListModel *filter_model;
+    GtkCustomFilter *name_filter;
+    GtkCustomSorter *sorter;
+} ModelUpdateData;
+
+static gboolean set_model_idle(gpointer user_data) {
+    ModelUpdateData *d = user_data;
+    
+    if (d->window->filter_model) {
+        g_object_unref(d->window->filter_model);
+    }
+    
+    gtk_grid_view_set_model(GTK_GRID_VIEW(d->window->grid_view), GTK_SELECTION_MODEL(d->grid_sel));
+    gtk_column_view_set_model(GTK_COLUMN_VIEW(d->window->list_view), GTK_SELECTION_MODEL(d->list_sel));
+    
+    d->window->filter_model = d->filter_model;
+    d->window->name_filter  = d->name_filter;
+    d->window->sorter       = d->sorter;
+    
+    update_statusbar(d->window);
+    
+    g_object_unref(d->grid_sel);
+    g_object_unref(d->list_sel);
+    g_free(d);
+    return G_SOURCE_REMOVE;
+}
+
 void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
     GError *err = NULL;
@@ -124,34 +155,18 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
     GtkCustomFilter    *filter   = gtk_custom_filter_new(name_filter_func, self, NULL);
     GtkFilterListModel *filtered = gtk_filter_list_model_new(G_LIST_MODEL(sorted), GTK_FILTER(filter));
 
-    /* Clear the views first to release old selection models */
-    GtkSelectionModel *old_grid_sel = gtk_grid_view_get_model(GTK_GRID_VIEW(self->grid_view));
-    if (old_grid_sel) gtk_selection_model_unselect_all(old_grid_sel);
-    gtk_grid_view_set_model(GTK_GRID_VIEW(self->grid_view), NULL);
-
-    GtkSelectionModel *old_list_sel = gtk_column_view_get_model(GTK_COLUMN_VIEW(self->list_view));
-    if (old_list_sel) gtk_selection_model_unselect_all(old_list_sel);
-    gtk_column_view_set_model(GTK_COLUMN_VIEW(self->list_view), NULL);
-
-    /* Unref the old filter_model (which recursively unrefs sorted, visible, filter, and sorter) */
-    if (self->filter_model) {
-        g_object_unref(self->filter_model);
-        self->filter_model = NULL;
-    }
-
-    self->filter_model = filtered;
-    self->name_filter  = filter;
-    self->sorter       = sorter;
-
     GtkMultiSelection *grid_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
-    gtk_grid_view_set_model(GTK_GRID_VIEW(self->grid_view), GTK_SELECTION_MODEL(grid_sel));
-    g_object_unref(grid_sel);
-
     GtkMultiSelection *list_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
-    gtk_column_view_set_model(GTK_COLUMN_VIEW(self->list_view), GTK_SELECTION_MODEL(list_sel));
-    g_object_unref(list_sel);
-
-    update_statusbar(self);
+    
+    ModelUpdateData *d = g_new0(ModelUpdateData, 1);
+    d->window = self;
+    d->grid_sel = grid_sel;
+    d->list_sel = list_sel;
+    d->filter_model = filtered;
+    d->name_filter = filter;
+    d->sorter = sorter;
+    
+    g_idle_add(set_model_idle, d);
 
     /* Start file monitor for current directory */
     setup_file_monitor(self, self->current_path);
