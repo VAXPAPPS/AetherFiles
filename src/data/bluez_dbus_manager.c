@@ -124,15 +124,30 @@ typedef struct {
     guint64 size;
     guint64 transferred;
     char *status;
+    char *session_path;
 } ObexTransferData;
 
 static void obex_transfer_data_free(ObexTransferData *data) {
     if (data->subscription_id > 0 && data->manager && data->manager->session_bus) {
         g_dbus_connection_signal_unsubscribe(data->manager->session_bus, data->subscription_id);
     }
+    
+    if (data->session_path && data->manager && data->manager->session_bus) {
+        g_dbus_connection_call(
+            data->manager->session_bus,
+            "org.bluez.obex",
+            "/org/bluez/obex",
+            "org.bluez.obex.Client1",
+            "RemoveSession",
+            g_variant_new("(o)", data->session_path),
+            NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL
+        );
+    }
+
     g_free(data->device_address);
     g_free(data->file_path);
     g_free(data->status);
+    g_free(data->session_path);
     g_clear_object(&data->manager);
     g_free(data);
 }
@@ -251,6 +266,8 @@ static void on_obex_session_ready(GObject *source_object, GAsyncResult *res, gpo
 
     const char *session_path = NULL;
     g_variant_get(result, "(&o)", &session_path);
+
+    transfer->session_path = g_strdup(session_path);
 
     /* Now we have the session, let's call SendFile on it */
     g_dbus_connection_call(
