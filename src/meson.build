@@ -23,6 +23,7 @@ aetherfiles_sources = [
   'presentation/views/app_uninstall_dialog.c',
   'presentation/views/bluetooth_share_dialog.c',
   'presentation/controllers/clipboard_controller.c',
+  'theme_manager.c',
 ]
 
 executable('aetherfiles',

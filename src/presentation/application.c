@@ -3,6 +3,7 @@
 #include "views/bluetooth_share_dialog.h"
 #include "controllers/clipboard_controller.h"
 #include "../data/archive_manager.h"
+#include "../theme_manager.h"
 #include <gio/gio.h>
 #include <string.h>
 
@@ -29,6 +30,7 @@ static void aether_application_activate(GApplication *app) {
 static void aether_application_startup(GApplication *app) {
     G_APPLICATION_CLASS(aether_application_parent_class)->startup(app);
     g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
+    theme_manager_init();
 }
 
 /* ── open ── */
