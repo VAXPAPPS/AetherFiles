@@ -16,6 +16,28 @@ G_BEGIN_DECLS
  */
 gboolean aether_privileged_is_available(void);
 
+/**
+ * aether_privileged_daemon_start:
+ *
+ * يُطلِق الـ daemon المحمي عبر pkexec (مرة واحدة فقط للجلسة).
+ * Returns: TRUE عند النجاح.
+ */
+gboolean aether_privileged_daemon_start(void);
+
+/**
+ * aether_privileged_daemon_is_running:
+ *
+ * Returns: TRUE إذا كان الـ daemon حياً وجاهزاً.
+ */
+gboolean aether_privileged_daemon_is_running(void);
+
+/**
+ * aether_privileged_session_end:
+ *
+ * يُنهي الـ daemon بشكل نظيف (يُستدعى تلقائياً عند atexit).
+ */
+void aether_privileged_session_end(void);
+
 /* ── إدراج مجلد محمي ───────────────────────────────────────────────── */
 
 /**

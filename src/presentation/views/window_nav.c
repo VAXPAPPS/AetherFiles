@@ -136,6 +136,12 @@ typedef struct {
     GtkCustomSorter *sorter;
 } ModelUpdateData;
 
+/* ── بيانات حوار تأكيد الصلاحيات ── */
+typedef struct {
+    AetherWindow *window;
+    char         *path;
+} ElevationAskData;
+
 static gboolean set_model_idle(gpointer user_data) {
     ModelUpdateData *d = user_data;
     
@@ -158,20 +164,99 @@ static gboolean set_model_idle(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
+/* ── صلاحيات الجلسة: TRUE بعد أول موافقة من المستخدم ── */
+static gboolean s_session_elevated = FALSE;
+
+/* ── دالة رد الفعل على حوار تأكيد الصلاحيات ── */
+static void on_elevation_ask_response(GtkDialog *dialog, int response_id, gpointer user_data) {
+    ElevationAskData *data = user_data;
+    gtk_window_destroy(GTK_WINDOW(dialog));
+
+    if (response_id == GTK_RESPONSE_ACCEPT) {
+        /* فعّل صلاحيات الجلسة: شغّل الـ daemon عبر pkexec مرة واحدة */
+        s_session_elevated = TRUE;
+        if (!aether_privileged_daemon_is_running()) {
+            /* daemon_start يطلب كلمة المرور عبر pkexec — مرة واحدة للجلسة */
+            if (!aether_privileged_daemon_start()) {
+                /* فشل تشغيل الـ daemon */
+                s_session_elevated = FALSE;
+                show_elevation_error(data->window, data->path,
+                                     "Failed to start privileged daemon.");
+                navigate_back(data->window);
+                g_free(data->path);
+                g_free(data);
+                return;
+            }
+        }
+        load_directory_elevated(data->window, data->path);
+    } else {
+        /* المستخدم رفض: ارجع للمسار السابق */
+        navigate_back(data->window);
+    }
+
+    g_free(data->path);
+    g_free(data);
+}
+
+
+/* ── عرض حوار تأكيد طلب الصلاحيات أو التنفيذ المباشر ── */
+static void ask_elevation(AetherWindow *self, const char *path) {
+    /* إذا وافق المستخدم سابقاً في هذه الجلسة، نفّذ مباشرةً */
+    if (s_session_elevated) {
+        load_directory_elevated(self, path);
+        return;
+    }
+
+    char *basename = g_path_get_basename(path);
+    char *title    = g_strdup_printf("Administrator access required");
+    char *msg      = g_strdup_printf(
+        "The folder <b>%s</b> requires administrator privileges to open.\n\n"
+        "You will be asked to enter your password.",
+        basename);
+
+    GtkWidget *dialog = gtk_message_dialog_new(
+        GTK_WINDOW(self),
+        GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+        GTK_MESSAGE_QUESTION,
+        GTK_BUTTONS_NONE,
+        "%s", title);
+
+    gtk_message_dialog_format_secondary_markup(
+        GTK_MESSAGE_DIALOG(dialog), "%s", msg);
+
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Cancel",   GTK_RESPONSE_CANCEL);
+    GtkWidget *open_btn = gtk_dialog_add_button(
+        GTK_DIALOG(dialog), "Open as Administrator", GTK_RESPONSE_ACCEPT);
+    gtk_widget_add_css_class(open_btn, "suggested-action");
+    gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
+
+    ElevationAskData *data = g_new0(ElevationAskData, 1);
+    data->window = self;
+    data->path   = g_strdup(path);
+
+    g_signal_connect(dialog, "response",
+                     G_CALLBACK(on_elevation_ask_response), data);
+    gtk_window_present(GTK_WINDOW(dialog));
+
+    g_free(basename);
+    g_free(title);
+    g_free(msg);
+}
+
 void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
     GError *err = NULL;
     GListModel *raw = aether_file_repository_list_directory_finish(
                           AETHER_FILE_REPOSITORY(source), res, &err);
     if (err) {
-        /* ── اعتراض خطأ الصلاحيات وإعادة المحاولة بصلاحيات مرتفعة ── */
+        /* ── اعتراض خطأ الصلاحيات: اسأل المستخدم أولاً ── */
         if (err->code == G_IO_ERROR_PERMISSION_DENIED ||
             err->code == G_IO_ERROR_NOT_FOUND) {
             /* G_IO_ERROR_NOT_FOUND قد يحدث على مجلدات root */
             if (self->current_path &&
                 aether_privileged_is_available()) {
                 g_error_free(err);
-                load_directory_elevated(self, self->current_path);
+                ask_elevation(self, self->current_path);
                 return;
             }
         }
@@ -236,7 +321,8 @@ void load_directory_elevated(AetherWindow *self, const char *path) {
  * on_elevated_list_done:
  * ينتهي عند وصول النتيجة من المساعد ويملأ العرض.
  */
-void on_elevated_list_done(GAsyncResult *res, gpointer ud) {
+void on_elevated_list_done(GObject *source, GAsyncResult *res, gpointer ud) {
+    (void)source;
     AetherWindow *self = AETHER_WINDOW(ud);
 
     if (self->progress_spinner)

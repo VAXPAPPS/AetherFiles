@@ -285,3 +285,89 @@ int privileged_ops_run(int argc, char **argv) {
     fprintf(stderr,"Unknown operation: %s\n", op);
     return 1;
 }
+
+/* ── وضع الـ daemon ─────────────────────────────────────────────────── */
+/*
+ * بروتوكول stdin/stdout:
+ *   الإرسال:  <op>\t<arg1>\t<arg2>...\n
+ *   الاستقبال: OK\n  أو  ERR:<msg>\n  أو سطر JSON لكل ملف (list)
+ *   الإنهاء:  EOF على stdin أو سطر "quit\n"
+ *
+ * مثال:
+ *   list\t/root\n        → أسطر JSON ثم DONE\n
+ *   copy\t/src\t/dst\n   → OK\n
+ *   quit\n               → إنهاء
+ */
+
+/* تقسيم سطر بـ \t إلى مصفوفة وسائط — المُستدعي يُحرّر argv[] */
+static int split_tab_line(char *line, char **argv, int max_argc) {
+    int argc = 0;
+    char *p = line;
+    while (*p && argc < max_argc - 1) {
+        argv[argc++] = p;
+        char *tab = strchr(p, '\t');
+        if (!tab) break;
+        *tab = '\0';
+        p = tab + 1;
+    }
+    /* الوسيط الأخير إلى نهاية السطر */
+    if (*p && argc < max_argc - 1) argv[argc++] = p;
+    argv[argc] = NULL;
+    return argc;
+}
+
+int privileged_ops_run_daemon(void) {
+    /* أعلن الجاهزية للطرف الآخر */
+    puts("READY");
+    fflush(stdout);
+
+    char line[65536];
+    while (fgets(line, sizeof(line), stdin)) {
+        /* إزالة \n في النهاية */
+        size_t len = strlen(line);
+        if (len > 0 && line[len-1] == '\n') line[len-1] = '\0';
+        if (len > 1 && line[len-2] == '\r') line[len-2] = '\0';
+
+        if (!line[0]) continue;              /* سطر فارغ */
+        if (!strcmp(line, "quit")) break;    /* إنهاء نظيف */
+
+        /* تقسيم السطر إلى أوامر */
+        char *argv[256];
+        int argc = split_tab_line(line, argv, 256);
+        if (argc < 1) continue;
+
+        const char *op = argv[0];
+
+        if (!strcmp(op, "list")) {
+            if (argc < 2) { perr("list: missing path"); continue; }
+            ops_list(argv[1]);
+            puts("DONE"); fflush(stdout);
+        } else if (!strcmp(op, "copy")) {
+            if (argc < 3) { perr("copy: missing args"); continue; }
+            ops_copy(argv[1], argv[2]);
+        } else if (!strcmp(op, "move")) {
+            if (argc < 3) { perr("move: missing args"); continue; }
+            ops_move(argv[1], argv[2]);
+        } else if (!strcmp(op, "delete")) {
+            if (argc < 2) { perr("delete: missing path"); continue; }
+            ops_delete(argv[1]);
+        } else if (!strcmp(op, "mkdir")) {
+            if (argc < 2) { perr("mkdir: missing path"); continue; }
+            ops_mkdir(argv[1]);
+        } else if (!strcmp(op, "touch")) {
+            if (argc < 2) { perr("touch: missing path"); continue; }
+            ops_touch(argv[1]);
+        } else if (!strcmp(op, "compress")) {
+            /* compress\tfmt\tdst\tsrc1\tsrc2... */
+            /* نبني argv مُعاد التنسيق: argv[0]="compress" argv[1]=fmt ... */
+            ops_compress(argc, argv);
+        } else if (!strcmp(op, "extract")) {
+            if (argc < 3) { perr("extract: missing args"); continue; }
+            ops_extract(argv[1], argv[2]);
+        } else {
+            perr("Unknown operation");
+        }
+    }
+    return 0;
+}
+

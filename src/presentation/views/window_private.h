@@ -170,7 +170,7 @@ GtkWidget *setup_apps_view(AetherWindow *self);
 void show_apps_view(AetherWindow *self);
 
 /* ── دوال الصلاحيات المرتفعة ── */
-void on_elevated_list_done(GAsyncResult *res, gpointer ud);
+void on_elevated_list_done(GObject *source, GAsyncResult *res, gpointer ud);
 void load_directory_elevated(AetherWindow *self, const char *path);
 void show_elevation_error(AetherWindow *self, const char *path, const char *message);
 
