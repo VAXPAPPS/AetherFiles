@@ -233,6 +233,84 @@ gridview > child:selected {
   filter: drop-shadow(0 2px 8px rgba(94, 196, 255, 0.25));
 }
 
+/* ── عنصر مقصوص: رمادي + شفاف ── */
+.item-cut {
+  opacity: 0.45;
+  filter: grayscale(0.85);
+}
+
+.item-cut image {
+  filter: drop-shadow(0 2px 8px rgba(94, 196, 255, 0.12)) grayscale(0.85) !important;
+  color: rgba(180, 180, 180, 0.60) !important;
+}
+
+/* ── ظل الأيقونات بحسب المسار ── */
+
+/* مسار Root: ظل بنفسجي */
+.path-root .nautilus-grid-cell image {
+  filter: drop-shadow(0 2px 10px rgba(168, 85, 247, 0.55));
+  color: #c084fc;
+}
+
+.path-root gridview > child:selected {
+  background: rgba(168, 85, 247, 0.22);
+}
+
+.path-root gridview > child:hover {
+  background: rgba(168, 85, 247, 0.11);
+}
+
+.path-root columnview > child:selected {
+  background: rgba(168, 85, 247, 0.22);
+}
+
+.path-root .aether-sidebar .navigation-sidebar row:selected {
+  background: rgba(168, 85, 247, 0.20);
+}
+
+.path-root .aether-sidebar .navigation-sidebar row:selected label,
+.path-root .aether-sidebar .navigation-sidebar row:selected image {
+  color: #c084fc;
+}
+
+/* مسار حساس/خطير: ظل أحمر */
+.path-danger .nautilus-grid-cell image {
+  filter: drop-shadow(0 2px 10px rgba(239, 68, 68, 0.60));
+  color: #fca5a5;
+}
+
+.path-danger gridview > child:selected {
+  background: rgba(239, 68, 68, 0.20);
+}
+
+.path-danger gridview > child:hover {
+  background: rgba(239, 68, 68, 0.10);
+}
+
+.path-danger columnview > child:selected {
+  background: rgba(239, 68, 68, 0.20);
+}
+
+.path-danger .aether-sidebar .navigation-sidebar row:selected {
+  background: rgba(239, 68, 68, 0.18);
+}
+
+.path-danger .aether-sidebar .navigation-sidebar row:selected label,
+.path-danger .aether-sidebar .navigation-sidebar row:selected image {
+  color: #fca5a5;
+}
+
+/* شريط المسار يتلوّن أيضاً */
+.path-root .aether-pathbar button:last-child    { color: #c084fc; }
+.path-danger .aether-pathbar button:last-child  { color: #fca5a5; }
+.path-root .aether-pathbar button:hover         { background: rgba(168,85,247,0.15); color: #c084fc; }
+.path-danger .aether-pathbar button:hover       { background: rgba(239,68,68,0.15); color: #fca5a5; }
+
+/* مؤشر أمان في شريط الحالة */
+.path-root .aether-statusbar label.path-status    { color: rgba(192,132,252,0.85); }
+.path-danger .aether-statusbar label.path-status  { color: rgba(252,165,165,0.85); font-weight:700; }
+
+
 .nautilus-grid-cell label {
   color: rgba(210, 230, 255, 0.90);
   font-size: 12px;

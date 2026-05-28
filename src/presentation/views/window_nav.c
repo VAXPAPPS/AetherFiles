@@ -3,6 +3,31 @@
 #ifdef G_OS_UNIX
 #include <gio/gdesktopappinfo.h>
 #endif
+#include <string.h>
+
+static void update_path_css_class(AetherWindow *self) {
+    GtkWidget *win = GTK_WIDGET(self);
+    gtk_widget_remove_css_class(win, "path-root");
+    gtk_widget_remove_css_class(win, "path-danger");
+    
+    if (!self->current_path) return;
+    
+    if (g_strcmp0(self->current_path, "/root") == 0) {
+        gtk_widget_add_css_class(win, "path-root");
+    } else if (g_str_has_prefix(self->current_path, "/etc") ||
+               g_str_has_prefix(self->current_path, "/usr") ||
+               g_str_has_prefix(self->current_path, "/bin") ||
+               g_str_has_prefix(self->current_path, "/sbin") ||
+               g_str_has_prefix(self->current_path, "/var") ||
+               g_str_has_prefix(self->current_path, "/boot") ||
+               g_str_has_prefix(self->current_path, "/sys") ||
+               g_str_has_prefix(self->current_path, "/proc") ||
+               g_str_has_prefix(self->current_path, "/dev") ||
+               g_str_has_prefix(self->current_path, "/opt") ||
+               g_strcmp0(self->current_path, "/") == 0) {
+        gtk_widget_add_css_class(win, "path-danger");
+    }
+}
 
 void load_directory(AetherWindow *self, const char *path) {
     if (self->current_path)
@@ -15,6 +40,7 @@ void load_directory(AetherWindow *self, const char *path) {
 
     g_free(self->current_path);
     self->current_path = g_strdup(path);
+    update_path_css_class(self);
     update_pathbar(self);
     update_nav_buttons(self);
     aether_file_repository_list_directory_async(

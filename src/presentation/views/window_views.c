@@ -1,6 +1,7 @@
 #include "window_private.h"
 #include <glib/gi18n.h>
 #include "../../data/thumbnail_manager.h"
+#include "../controllers/clipboard_controller.h"
 
 static void on_thumbnail_updated(AetherFileEntity *e, gpointer user_data) {
     GtkStack *stack = GTK_STACK(user_data);
@@ -121,6 +122,22 @@ void bind_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     }
     
     gtk_label_set_text(GTK_LABEL(label), aether_file_entity_get_name(e));
+
+    /* ── تعتيم العنصر إذا كان مقصوصاً ── */
+    AetherWindow *win = AETHER_WINDOW(d);
+    gboolean is_cut = FALSE;
+    if (win && win->clipboard &&
+        aether_clipboard_get_op(win->clipboard) == AETHER_CLIPBOARD_CUT) {
+        GStrv cut_paths = aether_clipboard_get_paths(win->clipboard);
+        const char *item_path = aether_file_entity_get_path(e);
+        for (int ci = 0; cut_paths && cut_paths[ci] && item_path; ci++) {
+            if (!g_strcmp0(cut_paths[ci], item_path)) { is_cut = TRUE; break; }
+        }
+    }
+    if (is_cut)
+        gtk_widget_add_css_class(box, "item-cut");
+    else
+        gtk_widget_remove_css_class(box, "item-cut");
 }
 
 void unbind_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
@@ -227,6 +244,22 @@ void bind_list_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     }
     
     gtk_label_set_text(GTK_LABEL(label), aether_file_entity_get_name(e));
+
+    /* ── تعتيم العنصر إذا كان مقصوصاً ── */
+    AetherWindow *win2 = AETHER_WINDOW(d);
+    gboolean is_cut2 = FALSE;
+    if (win2 && win2->clipboard &&
+        aether_clipboard_get_op(win2->clipboard) == AETHER_CLIPBOARD_CUT) {
+        GStrv cut_paths2 = aether_clipboard_get_paths(win2->clipboard);
+        const char *item_path2 = aether_file_entity_get_path(e);
+        for (int ci = 0; cut_paths2 && cut_paths2[ci] && item_path2; ci++) {
+            if (!g_strcmp0(cut_paths2[ci], item_path2)) { is_cut2 = TRUE; break; }
+        }
+    }
+    if (is_cut2)
+        gtk_widget_add_css_class(box, "item-cut");
+    else
+        gtk_widget_remove_css_class(box, "item-cut");
 }
 
 void unbind_list_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {

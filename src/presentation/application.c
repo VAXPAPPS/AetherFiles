@@ -52,6 +52,8 @@ static void on_cut_action(GSimpleAction *action, GVariant *parameter, gpointer u
     if (paths) {
         aether_clipboard_set(app->clipboard, paths, AETHER_CLIPBOARD_CUT);
         g_strfreev(paths);
+        /* إعادة تحميل الواجهة لتطبيق ستايل العناصر المقصوصة */
+        aether_window_reload(win);
     }
 }
 
