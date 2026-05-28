@@ -137,7 +137,22 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
     GError *err = NULL;
     GListModel *raw = aether_file_repository_list_directory_finish(
                           AETHER_FILE_REPOSITORY(source), res, &err);
-    if (err) { g_printerr("Error: %s\n", err->message); g_error_free(err); return; }
+    if (err) {
+        /* ── اعتراض خطأ الصلاحيات وإعادة المحاولة بصلاحيات مرتفعة ── */
+        if (err->code == G_IO_ERROR_PERMISSION_DENIED ||
+            err->code == G_IO_ERROR_NOT_FOUND) {
+            /* G_IO_ERROR_NOT_FOUND قد يحدث على مجلدات root */
+            if (self->current_path &&
+                aether_privileged_is_available()) {
+                g_error_free(err);
+                load_directory_elevated(self, self->current_path);
+                return;
+            }
+        }
+        g_printerr("Error: %s\n", err->message);
+        g_error_free(err);
+        return;
+    }
 
     GListStore *visible = g_list_store_new(AETHER_TYPE_FILE_ENTITY);
     guint n = g_list_model_get_n_items(raw);
@@ -170,6 +185,106 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
 
     /* Start file monitor for current directory */
     setup_file_monitor(self, self->current_path);
+}
+
+/* ──────────────────────────────────────────────────────────────
+ * دوال الصلاحيات المرتفعة
+ * ───────────────────────────────────────────────────────────── */
+
+/**
+ * load_directory_elevated:
+ * يشغّل pkexec + aetherfiles-helper list وينتظر النتيجة.
+ * يُستدعى تلقائياً عندما يرصد خطأ PERMISSION_DENIED.
+ */
+void load_directory_elevated(AetherWindow *self, const char *path) {
+    /* أظهر Spinner للتلميح بأن الطلب جارٍ */
+    if (self->progress_spinner)
+        gtk_spinner_start(GTK_SPINNER(self->progress_spinner));
+
+    aether_privileged_list_async(path, NULL,
+                                  (GAsyncReadyCallback)on_elevated_list_done,
+                                  self);
+}
+
+/**
+ * on_elevated_list_done:
+ * ينتهي عند وصول النتيجة من المساعد ويملأ العرض.
+ */
+void on_elevated_list_done(GAsyncResult *res, gpointer ud) {
+    AetherWindow *self = AETHER_WINDOW(ud);
+
+    if (self->progress_spinner)
+        gtk_spinner_stop(GTK_SPINNER(self->progress_spinner));
+
+    GError *err = NULL;
+    GListModel *raw = aether_privileged_list_finish(res, &err);
+
+    if (err) {
+        /* المستخدم رفض أو فشلت المصادقة */
+        const char *msg = (err->code == G_IO_ERROR_CANCELLED ||
+                           err->code == G_IO_ERROR_PERMISSION_DENIED)
+            ? "Authentication was cancelled or denied."
+            : err->message;
+
+        show_elevation_error(self, self->current_path, msg);
+        g_error_free(err);
+
+        /* اعدل elevated_mode وارجع للمسار السابق */
+        self->elevated_mode = FALSE;
+        navigate_back(self);
+        return;
+    }
+
+    /* نجاح: اضبط وضع الصلاحيات وملأ العرض */
+    self->elevated_mode = TRUE;
+
+    GListStore *visible = g_list_store_new(AETHER_TYPE_FILE_ENTITY);
+    guint n = g_list_model_get_n_items(raw);
+    for (guint i = 0; i < n; i++) {
+        AetherFileEntity *e = AETHER_FILE_ENTITY(g_list_model_get_item(raw, i));
+        g_list_store_append(visible, e);
+        g_object_unref(e);
+    }
+    g_object_unref(raw);
+
+    GtkCustomSorter    *sorter   = gtk_custom_sorter_new(compare_entities, self, NULL);
+    GtkSortListModel   *sorted   = gtk_sort_list_model_new(G_LIST_MODEL(visible), GTK_SORTER(sorter));
+    GtkCustomFilter    *filter   = gtk_custom_filter_new(name_filter_func, self, NULL);
+    GtkFilterListModel *filtered = gtk_filter_list_model_new(G_LIST_MODEL(sorted), GTK_FILTER(filter));
+
+    GtkMultiSelection *grid_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
+    GtkMultiSelection *list_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
+
+    ModelUpdateData *d = g_new0(ModelUpdateData, 1);
+    d->window     = self;
+    d->grid_sel   = grid_sel;
+    d->list_sel   = list_sel;
+    d->filter_model = filtered;
+    d->name_filter  = filter;
+    d->sorter       = sorter;
+
+    g_idle_add(set_model_idle, d);
+
+    /* لا نفعّل file monitor للمسارات المحمية (pkexec لا يدعم GFileMonitor) */
+}
+
+/**
+ * show_elevation_error:
+ * يعرض رسالة خطأ بسيطة إذا فشلت العملية المحمية.
+ */
+void show_elevation_error(AetherWindow *self, const char *path, const char *message) {
+    (void)path;
+    GtkWidget *dialog = gtk_message_dialog_new(
+        GTK_WINDOW(self),
+        GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+        GTK_MESSAGE_ERROR,
+        GTK_BUTTONS_CLOSE,
+        "فشلت العملية بصلاحيات مرتفعة");
+    gtk_message_dialog_format_secondary_text(
+        GTK_MESSAGE_DIALOG(dialog), "%s", message);
+    g_signal_connect(dialog, "response",
+                     G_CALLBACK(gtk_window_destroy), NULL);
+    gtk_window_present(GTK_WINDOW(dialog));
 }
 
 void setup_file_monitor(AetherWindow *self, const char *path) {

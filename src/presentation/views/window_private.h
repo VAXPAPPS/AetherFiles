@@ -5,6 +5,7 @@
 #include "../../data/gio_file_repository.h"
 #include "../../data/drive_manager.h"
 #include "../../data/app_repository.h"
+#include "../../data/privileged_file_manager.h"
 #include "../controllers/clipboard_controller.h"
 #include <gio/gio.h>
 #include <gtk/gtk.h>
@@ -67,6 +68,9 @@ struct _AetherWindow {
     GPtrArray  *redo_stack;
 
     GtkRecentManager *recent_mgr;
+
+    /* وضع الصلاحيات المرتفعة - TRUE إذا كان المسار الحالي يتطلب صلاحيات root */
+    gboolean elevated_mode;
 };
 
 typedef struct {
@@ -164,5 +168,10 @@ gboolean on_close_tab_shortcut(GtkWidget *w, GVariant *a, gpointer ud);
 /* window_apps.h included here to avoid circular dependencies if possible, or we just declare functions */
 GtkWidget *setup_apps_view(AetherWindow *self);
 void show_apps_view(AetherWindow *self);
+
+/* ── دوال الصلاحيات المرتفعة ── */
+void on_elevated_list_done(GAsyncResult *res, gpointer ud);
+void load_directory_elevated(AetherWindow *self, const char *path);
+void show_elevation_error(AetherWindow *self, const char *path, const char *message);
 
 #endif // AETHER_WINDOW_PRIVATE_H

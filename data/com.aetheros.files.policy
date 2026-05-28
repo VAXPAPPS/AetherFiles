@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+
+<!--
+  com.aetheros.files.policy
+  سياسة Polkit الرسمية لـ AetherFiles تُعرّف إجراء إدارة ملفات النظام.
+-->
+
+<policyconfig>
+  <vendor>AetherOS</vendor>
+  <vendor_url>https://github.com/aetheros/files</vendor_url>
+  <icon_name>system-file-manager</icon_name>
+
+  <action id="com.aetheros.files.manage-system-files">
+
+    <description xml:lang="en">Manage Protected System Files</description>
+    <description xml:lang="ar">إدارة ملفات النظام المحمية</description>
+
+    <message xml:lang="en">
+      AetherFiles requires administrator privileges to access or modify
+      this protected system path. Please authenticate to continue.
+    </message>
+    <message xml:lang="ar">
+      يتطلب AetherFiles صلاحيات المدير للوصول إلى هذا المسار المحمي
+      أو تعديله. يرجى المصادقة للمتابعة.
+    </message>
+
+    <!--
+      allow_any    : ما يُسمح لأي جلسة (console/remote)
+      allow_inactive: جلسة غير نشطة (remote login)
+      allow_active  : جلسة نشطة (المستخدم أمام الشاشة)
+
+      auth_admin = يطلب كلمة مرور مدير النظام (root/sudo)
+      auth_self  = يطلب كلمة مرور المستخدم الحالي (إذا كان في sudoers)
+    -->
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+
+    <!-- التطبيق نفسه يعمل كمساعد عند استدعائه بـ --privileged عبر pkexec -->
+    <annotate key="org.freedesktop.policykit.exec.path">
+      /usr/bin/aetherfiles
+    </annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+
+  </action>
+
+</policyconfig>

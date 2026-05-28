@@ -11,3 +11,4 @@ void         aether_window_reload           (AetherWindow *self);
 GStrv        aether_window_get_selected_paths(AetherWindow *self);
 void         aether_window_start_progress   (AetherWindow *self);
 void         aether_window_stop_progress    (AetherWindow *self);
+gboolean     aether_window_get_elevated_mode(AetherWindow *self);

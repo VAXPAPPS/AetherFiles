@@ -488,4 +488,7 @@ void aether_window_stop_progress(AetherWindow *self) {
     if (self->progress_spinner) gtk_spinner_stop(GTK_SPINNER(self->progress_spinner));
 }
 
+gboolean aether_window_get_elevated_mode(AetherWindow *self) {
+    return self->elevated_mode;
+}
 

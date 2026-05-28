@@ -3,6 +3,7 @@
 #include "views/bluetooth_share_dialog.h"
 #include "controllers/clipboard_controller.h"
 #include "../data/archive_manager.h"
+#include "../data/privileged_file_manager.h"
 #include "../theme_manager.h"
 #include <gio/gio.h>
 #include <string.h>
@@ -67,6 +68,84 @@ static void on_copy_action(GSimpleAction *action, GVariant *parameter, gpointer 
 }
 
 /* ── paste ── */
+/* ── مساعد داخلي: إعادة تحميل بعد العملية المحمية ── */
+static void on_privileged_op_done(GObject *src, GAsyncResult *res, gpointer ud) {
+    (void)src;
+    AetherWindow *win = AETHER_WINDOW(ud);
+    aether_window_stop_progress(win);
+    GError *err = NULL;
+    if (!aether_privileged_op_finish(res, &err)) {
+        g_printerr("Privileged operation failed: %s\n", err ? err->message : "?");
+        if (err) g_error_free(err);
+    }
+    aether_window_reload(win);
+}
+
+/* ── بيانات لتمرير context كامل لعملية اللصق المحمية ── */
+typedef struct {
+    AetherApplication *app;
+    char             **paths;   /* نسخة من paths الـ clipboard */
+    char              *dest_dir;
+    AetherClipboardOp  op;
+    int                total;
+    int                pending;
+    gboolean           has_error;
+} PrivPasteCtx;
+
+static void on_priv_paste_file_done(GObject *src, GAsyncResult *res, gpointer ud) {
+    (void)src;
+    PrivPasteCtx *ctx = ud;
+    GError *err = NULL;
+    if (!aether_privileged_op_finish(res, &err)) {
+        g_printerr("Privileged paste failed: %s\n", err ? err->message : "?");
+        if (err) g_error_free(err);
+        ctx->has_error = TRUE;
+    }
+    ctx->pending--;
+    if (ctx->pending == 0) {
+        AetherWindow *w = get_active_win(G_APPLICATION(ctx->app));
+        if (w) {
+            aether_window_stop_progress(w);
+            aether_window_reload(w);
+        }
+        g_strfreev(ctx->paths);
+        g_free(ctx->dest_dir);
+        g_free(ctx);
+    }
+}
+
+static void paste_privileged(AetherApplication *app,
+                              GStrv              paths,
+                              AetherClipboardOp  op,
+                              const char        *dest_dir)
+{
+    int total = g_strv_length(paths);
+    if (total == 0) return;
+
+    PrivPasteCtx *ctx = g_new0(PrivPasteCtx, 1);
+    ctx->app      = app;
+    ctx->paths    = g_strdupv(paths);
+    ctx->dest_dir = g_strdup(dest_dir);
+    ctx->op       = op;
+    ctx->total    = total;
+    ctx->pending  = total;
+
+    for (int i = 0; paths[i]; i++) {
+        char *basename  = g_path_get_basename(paths[i]);
+        char *dest_path = g_build_filename(dest_dir, basename, NULL);
+        g_free(basename);
+
+        if (op == AETHER_CLIPBOARD_COPY)
+            aether_privileged_copy_async(paths[i], dest_path,
+                on_priv_paste_file_done, ctx);
+        else
+            aether_privileged_move_async(paths[i], dest_path,
+                on_priv_paste_file_done, ctx);
+
+        g_free(dest_path);
+    }
+}
+
 static void on_paste_done(GObject *src, GAsyncResult *res, gpointer ud) {
     (void)src;
     AetherApplication *app = AETHER_APPLICATION(ud);
@@ -75,7 +154,23 @@ static void on_paste_done(GObject *src, GAsyncResult *res, gpointer ud) {
 
     GError *err = NULL;
     aether_clipboard_paste_finish(app->clipboard, res, &err);
-    if (err) { g_printerr("Paste error: %s\n", err->message); g_error_free(err); }
+    if (err) {
+        /* عند PERMISSION_DENIED: أعد المحاولة عبر المساعد المحمي */
+        if (err->code == G_IO_ERROR_PERMISSION_DENIED &&
+            aether_privileged_is_available() && w) {
+            g_error_free(err);
+            const char *dest = aether_window_get_current_path(w);
+            GStrv paths      = aether_clipboard_get_paths(app->clipboard);
+            AetherClipboardOp op = aether_clipboard_get_op(app->clipboard);
+            if (dest && paths && paths[0]) {
+                aether_window_start_progress(w);
+                paste_privileged(app, paths, op, dest);
+                return; /* إعادة التحميل ستحدث في on_priv_paste_file_done */
+            }
+        }
+        g_printerr("Paste error: %s\n", err->message);
+        g_error_free(err);
+    }
     
     if (w) aether_window_reload(w);
 }
@@ -110,11 +205,28 @@ static void on_rename_response(GtkDialog *d, int response_id, gpointer ud) {
     GFile  *file = g_file_parse_name(src);
     GError *err  = NULL;
     GFile  *renamed = g_file_set_display_name(file, new_name, NULL, &err);
-    if (err) { g_printerr("Rename error: %s\n", err->message); g_error_free(err); }
+    if (err) {
+        /* عند فشل إعادة التسمية بسبب الصلاحيات، استخدم move عبر المساعد */
+        if (err->code == G_IO_ERROR_PERMISSION_DENIED &&
+            aether_privileged_is_available()) {
+            g_error_free(err);
+            char *parent = g_path_get_dirname(src);
+            char *new_path = g_build_filename(parent, new_name, NULL);
+            AetherWindow *w2 = get_active_win(G_APPLICATION(a));
+            aether_privileged_move_async(src, new_path,
+                (GAsyncReadyCallback)on_privileged_op_done, w2);
+            g_free(parent);
+            g_free(new_path);
+        } else {
+            g_printerr("Rename error: %s\n", err->message);
+            g_error_free(err);
+        }
+    } else {
+        AetherWindow *w = get_active_win(G_APPLICATION(a));
+        if (w) aether_window_reload(w);
+    }
     if (renamed) g_object_unref(renamed);
     g_object_unref(file);
-    AetherWindow *w = get_active_win(G_APPLICATION(a));
-    if (w) aether_window_reload(w);
     gtk_window_destroy(GTK_WINDOW(d));
 }
 
@@ -200,6 +312,23 @@ static void on_rename_path_action(GSimpleAction *action, GVariant *parameter, gp
 }
 
 /* ── trash ── */
+/* ── trash ── */
+typedef struct { AetherApplication *app; char *path; } TrashCtx;
+
+static void on_privileged_trash_done(GObject *src, GAsyncResult *res, gpointer ud) {
+    (void)src;
+    TrashCtx *ctx = ud;
+    GError *err = NULL;
+    if (!aether_privileged_op_finish(res, &err)) {
+        g_printerr("Privileged trash failed: %s\n", err ? err->message : "?");
+        if (err) g_error_free(err);
+    }
+    AetherWindow *win = get_active_win(G_APPLICATION(ctx->app));
+    if (win) aether_window_reload(win);
+    g_free(ctx->path);
+    g_free(ctx);
+}
+
 static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action; (void)parameter;
     AetherApplication *app = AETHER_APPLICATION(user_data);
@@ -212,8 +341,19 @@ static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer
         GFile  *f = g_file_parse_name(paths[i]);
         GError *err  = NULL;
         if (!g_file_trash(f, NULL, &err)) {
-            g_printerr("Trash failed: %s\n", err->message);
-            g_error_free(err);
+            /* عند فشل الحذف للسلة حاول الحذف المباشر عبر المساعد */
+            if (err && err->code == G_IO_ERROR_PERMISSION_DENIED &&
+                aether_privileged_is_available()) {
+                g_error_free(err);
+                TrashCtx *ctx = g_new0(TrashCtx, 1);
+                ctx->app  = app;
+                ctx->path = g_strdup(paths[i]);
+                aether_privileged_delete_async(paths[i],
+                    (GAsyncReadyCallback)on_privileged_trash_done, ctx);
+            } else {
+                g_printerr("Trash failed: %s\n", err ? err->message : "?");
+                if (err) g_error_free(err);
+            }
         } else {
             aether_window_reload(win);
         }
@@ -229,6 +369,7 @@ static void on_archive_finished(GObject *source, GAsyncResult *res, gpointer use
     gboolean success = g_task_propagate_boolean(G_TASK(res), &err);
     
     if (!success || err) {
+        /* عند فشل الضغط/فك بسبب الصلاحيات، سيُعالج من الدالة المستدعية */
         g_printerr("Archive operation failed: %s\n", err ? err->message : "Unknown error");
         if (err) g_error_free(err);
     }
@@ -249,9 +390,15 @@ static void on_extract_action(GSimpleAction *action, GVariant *parameter, gpoint
     
     aether_window_start_progress(win);
 
-    aether_archive_manager_extract_async(aether_archive_manager_get_default(), 
-                                         archive_path, dest_dir, 
-                                         on_archive_finished, win);
+    /* حاول العملية العادية أولاً */
+    if (aether_window_get_elevated_mode(win) && aether_privileged_is_available()) {
+        aether_privileged_extract_async(archive_path, dest_dir,
+            (GAsyncReadyCallback)on_privileged_op_done, win);
+    } else {
+        aether_archive_manager_extract_async(aether_archive_manager_get_default(), 
+                                             archive_path, dest_dir, 
+                                             on_archive_finished, win);
+    }
     g_free(dest_dir);
 }
 
@@ -300,9 +447,15 @@ static void on_compress_action(GSimpleAction *action, GVariant *parameter, gpoin
     
     aether_window_start_progress(win);
 
-    aether_archive_manager_compress_async(aether_archive_manager_get_default(), 
-                                          paths, dest_path, format, 
-                                          on_archive_finished, win);
+    /* إذا كانت النافذة في وضع الصلاحيات المرتفعة، استخدم المساعد */
+    if (aether_window_get_elevated_mode(win) && aether_privileged_is_available()) {
+        aether_privileged_compress_async(format, dest_path, paths,
+            (GAsyncReadyCallback)on_privileged_op_done, win);
+    } else {
+        aether_archive_manager_compress_async(aether_archive_manager_get_default(), 
+                                              paths, dest_path, format, 
+                                              on_archive_finished, win);
+    }
                                           
     g_free(dest_path);
     g_free(dest_name);
@@ -354,10 +507,18 @@ static void on_delete_permanently_action(GSimpleAction *action, GVariant *parame
     for (int i = 0; paths[i]; i++) {
         GFile *file = g_file_parse_name(paths[i]);
         GError *err = NULL;
-        g_file_delete(file, NULL, &err);
-        if (err) {
-            g_printerr("Delete error: %s\n", err->message);
-            g_error_free(err);
+        if (!g_file_delete(file, NULL, &err)) {
+            /* عند فشل الحذف بسبب الصلاحيات، حاول عبر المساعد */
+            if (err && err->code == G_IO_ERROR_PERMISSION_DENIED &&
+                aether_privileged_is_available()) {
+                g_error_free(err);
+                aether_window_start_progress(win);
+                aether_privileged_delete_async(paths[i],
+                    (GAsyncReadyCallback)on_privileged_op_done, win);
+            } else {
+                g_printerr("Delete error: %s\n", err ? err->message : "?");
+                if (err) g_error_free(err);
+            }
         }
         g_object_unref(file);
     }

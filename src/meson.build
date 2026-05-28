@@ -11,6 +11,8 @@ aetherfiles_sources = [
   'data/thumbnail_manager.c',
   'data/archive_manager.c',
   'data/bluez_dbus_manager.c',
+  'data/privileged_file_manager.c',
+  'helper/privileged_ops.c',
   'presentation/application.c',
   'presentation/views/window.c',
   'presentation/views/window_sidebar.c',

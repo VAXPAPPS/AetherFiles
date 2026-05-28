@@ -1,7 +1,21 @@
 #include "window_private.h"
 #include <glib/gi18n.h>
 
+/* ── دالة مشتركة لإعادة التحميل بعد العملية المحمية ── */
+static void on_privileged_action_done(GObject *src, GAsyncResult *res, gpointer ud) {
+    (void)src;
+    AetherWindow *w = AETHER_WINDOW(ud);
+    aether_window_stop_progress(w);
+    GError *err = NULL;
+    if (!aether_privileged_op_finish(res, &err)) {
+        g_printerr("Privileged action failed: %s\n", err ? err->message : "?");
+        if (err) g_error_free(err);
+    }
+    load_directory(w, w->current_path);
+}
+
 void on_new_folder_clicked(GtkButton *btn, gpointer user_data) {
+    (void)btn;
     AetherWindow *self = AETHER_WINDOW(user_data);
     if (!self->current_path) return;
 
@@ -48,9 +62,20 @@ void on_new_folder_response(GtkDialog *d, int response_id, gpointer ud) {
     char  *full = g_build_filename(w->current_path, nm, NULL);
     GFile *dir  = g_file_new_for_path(full);
     GError *err = NULL;
-    g_file_make_directory(dir, NULL, &err);
-    if (err) { g_printerr("mkdir error: %s\n", err->message); g_error_free(err); }
-    else      { load_directory(w, w->current_path); }
+    if (!g_file_make_directory(dir, NULL, &err)) {
+        /* عند فشل إنشاء المجلد بسبب الصلاحيات، حاول عبر المساعد */
+        if (err && err->code == G_IO_ERROR_PERMISSION_DENIED &&
+            aether_privileged_is_available()) {
+            g_error_free(err);
+            aether_privileged_mkdir_async(full,
+                (GAsyncReadyCallback)on_privileged_action_done, w);
+        } else {
+            g_printerr("mkdir error: %s\n", err ? err->message : "?");
+            if (err) g_error_free(err);
+        }
+    } else {
+        load_directory(w, w->current_path);
+    }
     g_free(full);
     g_object_unref(dir);
     gtk_window_destroy(GTK_WINDOW(d));
@@ -67,8 +92,15 @@ void on_new_document_clicked(GtkButton *btn, gpointer user_data) {
         g_object_unref(stream);
         load_directory(self, self->current_path);
     } else if (err) {
-        g_printerr("touch error: %s\n", err->message);
-        g_error_free(err);
+        if (err->code == G_IO_ERROR_PERMISSION_DENIED &&
+            aether_privileged_is_available()) {
+            g_error_free(err);
+            aether_privileged_touch_async(full,
+                (GAsyncReadyCallback)on_privileged_action_done, self);
+        } else {
+            g_printerr("touch error: %s\n", err->message);
+            g_error_free(err);
+        }
     }
     g_free(full);
     g_object_unref(file);
