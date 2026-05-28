@@ -34,10 +34,6 @@ void setup_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_add_css_class(box, "nautilus-grid-cell");
     gtk_widget_set_size_request(box, 110, 110);
-    gtk_widget_set_margin_top(box, 6);
-    gtk_widget_set_margin_bottom(box, 6);
-    gtk_widget_set_margin_start(box, 6);
-    gtk_widget_set_margin_end(box, 6);
 
     GtkWidget *stack = gtk_stack_new();
     gtk_widget_set_halign(stack, GTK_ALIGN_CENTER);
