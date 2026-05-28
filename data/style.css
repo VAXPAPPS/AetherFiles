@@ -210,7 +210,7 @@ gridview {
 gridview > child {
   border-radius: 10px;
   transition: background 130ms ease;
-  margin: 2px 3px; /* لإعطاء مسافة بصرية قريبة من 5 بكسل بين العناصر */
+  margin: 10px 10px; /* لإعطاء مسافة بصرية قريبة من 5 بكسل بين العناصر */
 }
 
 gridview > child:hover {
