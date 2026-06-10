@@ -48,8 +48,13 @@ struct _AetherWindow {
     GtkFilterListModel *filter_model;
     GtkCustomFilter    *name_filter;
     GtkCustomSorter    *sorter;
+    GtkMultiSelection  *grid_sel;
+    GtkMultiSelection  *list_sel;
     char               *filter_string;
     int                 search_filter_type; // 0=All, 1=Media, 2=Doc, 3=Folder, 4=Apps, 5=Archive
+
+    gboolean rubberband_active;
+    double   rubberband_x0, rubberband_y0;
 
     int     sort_mode;
     gboolean sort_asc;

@@ -21,6 +21,101 @@ static void load_css(void) {
     g_object_unref(provider);
 }
 
+/* ══ Rubber Band Hover Highlight ══
+ * GTK لا يُظهر حالة :selected أثناء سحب الشريط المطاطي — نحاكيها
+ * بإضافة class "rubber-hover" على كل عنصر تتقاطع حدوده مع مستطيل السحب. */
+
+static void clear_rubber_hover(GtkWidget *view) {
+    GtkWidget *child = gtk_widget_get_first_child(view);
+    while (child) {
+        gtk_widget_remove_css_class(child, "rubber-hover");
+        child = gtk_widget_get_next_sibling(child);
+    }
+}
+
+static void on_rubberband_press(GtkGestureClick *g, int n,
+                                double x, double y, AetherWindow *self) {
+    (void)n;
+    /* فقط نُفعّل الـ rubber-hover إذا كان الضغط على الخلفية (ليس على عنصر).
+     * gtk_widget_pick يرجع العرض نفسه عند الضغط على الخلفية الفارغة. */
+    GtkWidget *view = GTK_WIDGET(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g)));
+    GtkWidget *picked = gtk_widget_pick(view, x, y, GTK_PICK_DEFAULT);
+    if (picked != view) return; /* ضغط على عنصر — لا نُفعّل */
+
+    self->rubberband_active = TRUE;
+    self->rubberband_x0 = x;
+    self->rubberband_y0 = y;
+}
+
+static void on_rubberband_release(GtkGestureClick *g, int n,
+                                  double x, double y, AetherWindow *self) {
+    (void)g; (void)n; (void)x; (void)y;
+    self->rubberband_active = FALSE;
+    clear_rubber_hover(self->grid_view);
+    clear_rubber_hover(self->list_view);
+}
+
+/* يُطلَق عندما يستولي gesture آخر على التسلسل (مثل gesture عنصر) */
+static void on_rubberband_cancel(GtkGesture *g, GdkEventSequence *seq, AetherWindow *self) {
+    (void)g; (void)seq;
+    self->rubberband_active = FALSE;
+    clear_rubber_hover(self->grid_view);
+    clear_rubber_hover(self->list_view);
+}
+
+static void on_rubberband_motion(GtkEventControllerMotion *ctrl,
+                                 double x, double y, AetherWindow *self) {
+    if (!self->rubberband_active) return;
+
+    /* فحص أمان: إذا رُفع الزر دون أن تُطلَق released/cancel، نُعيد الضبط */
+    GdkModifierType state =
+        gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(ctrl));
+    if (!(state & GDK_BUTTON1_MASK)) {
+        self->rubberband_active = FALSE;
+        clear_rubber_hover(self->grid_view);
+        clear_rubber_hover(self->list_view);
+        return;
+    }
+
+    graphene_rect_t band;
+    graphene_rect_init(&band,
+        (float)MIN(self->rubberband_x0, x),
+        (float)MIN(self->rubberband_y0, y),
+        (float)fabs(x - self->rubberband_x0),
+        (float)fabs(y - self->rubberband_y0));
+
+    /* تحديد العرض النشط */
+    const char *visible = gtk_stack_get_visible_child_name(GTK_STACK(self->view_stack));
+    GtkWidget *view = g_strcmp0(visible, "list") == 0
+                      ? self->list_view : self->grid_view;
+
+    GtkWidget *child = gtk_widget_get_first_child(view);
+    while (child) {
+        graphene_rect_t bounds;
+        if (gtk_widget_compute_bounds(child, view, &bounds) &&
+            graphene_rect_intersection(&band, &bounds, NULL)) {
+            gtk_widget_add_css_class(child, "rubber-hover");
+        } else {
+            gtk_widget_remove_css_class(child, "rubber-hover");
+        }
+        child = gtk_widget_get_next_sibling(child);
+    }
+}
+
+static void setup_rubberband_hover(AetherWindow *self, GtkWidget *view) {
+    GtkGesture *click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(click), GTK_PHASE_CAPTURE);
+    g_signal_connect(click, "pressed",  G_CALLBACK(on_rubberband_press),   self);
+    g_signal_connect(click, "released", G_CALLBACK(on_rubberband_release),  self);
+    g_signal_connect(click, "cancel",   G_CALLBACK(on_rubberband_cancel),   self);
+    gtk_widget_add_controller(view, GTK_EVENT_CONTROLLER(click));
+
+    GtkEventControllerMotion *motion = GTK_EVENT_CONTROLLER_MOTION(gtk_event_controller_motion_new());
+    g_signal_connect(motion, "motion", G_CALLBACK(on_rubberband_motion), self);
+    gtk_widget_add_controller(view, GTK_EVENT_CONTROLLER(motion));
+}
+
 
 static void aether_window_dispose(GObject *object) {
     AetherWindow *self = AETHER_WINDOW(object);
@@ -42,6 +137,8 @@ static void aether_window_dispose(GObject *object) {
             tab_session_free_fields(&g_array_index(self->tabs, AetherTabSession, i));
         g_array_free(self->tabs, TRUE);
     }
+    g_clear_object(&self->grid_sel);
+    g_clear_object(&self->list_sel);
     aether_clipboard_controller_free(self->clipboard);
     G_OBJECT_CLASS(aether_window_parent_class)->dispose(object);
 }
@@ -378,6 +475,8 @@ static void aether_window_init(AetherWindow *self) {
     /* ══ Drag & Drop ══ */
     setup_drag_drop(self, self->grid_view);
     setup_drag_drop(self, self->list_view);
+    setup_rubberband_hover(self, self->grid_view);
+    setup_rubberband_hover(self, self->list_view);
 
     /* ══ Bookmarks ══ */
     self->bookmark_row_start = -1; /* will be set in load_bookmarks */

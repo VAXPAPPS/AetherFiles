@@ -142,22 +142,52 @@ typedef struct {
     char         *path;
 } ElevationAskData;
 
+/* إعادة رسم العرض فوراً عند تغيير التحديد (ضروري لـ Rubber Band) */
+static void on_selection_changed(GtkSelectionModel *model, guint pos, guint n_items, gpointer view) {
+    (void)model; (void)pos; (void)n_items;
+    gtk_widget_queue_draw(GTK_WIDGET(view));
+}
+
 static gboolean set_model_idle(gpointer user_data) {
     ModelUpdateData *d = user_data;
-    
+
+    /* فصل الإشارات القديمة وتحرير النماذج السابقة */
+    if (d->window->grid_sel) {
+        g_signal_handlers_disconnect_by_func(d->window->grid_sel,
+                                             on_selection_changed,
+                                             d->window->grid_view);
+        g_clear_object(&d->window->grid_sel);
+    }
+    if (d->window->list_sel) {
+        g_signal_handlers_disconnect_by_func(d->window->list_sel,
+                                             on_selection_changed,
+                                             d->window->list_view);
+        g_clear_object(&d->window->list_sel);
+    }
     if (d->window->filter_model) {
         g_object_unref(d->window->filter_model);
     }
-    
-    gtk_grid_view_set_model(GTK_GRID_VIEW(d->window->grid_view), GTK_SELECTION_MODEL(d->grid_sel));
-    gtk_column_view_set_model(GTK_COLUMN_VIEW(d->window->list_view), GTK_SELECTION_MODEL(d->list_sel));
-    
+
+    gtk_grid_view_set_model(GTK_GRID_VIEW(d->window->grid_view),
+                            GTK_SELECTION_MODEL(d->grid_sel));
+    gtk_column_view_set_model(GTK_COLUMN_VIEW(d->window->list_view),
+                              GTK_SELECTION_MODEL(d->list_sel));
+
+    /* احفظ المراجع وربط الإشارات للرسم الفوري أثناء Rubber Band */
+    d->window->grid_sel = g_object_ref(d->grid_sel);
+    d->window->list_sel = g_object_ref(d->list_sel);
+
+    g_signal_connect(d->window->grid_sel, "selection-changed",
+                     G_CALLBACK(on_selection_changed), d->window->grid_view);
+    g_signal_connect(d->window->list_sel, "selection-changed",
+                     G_CALLBACK(on_selection_changed), d->window->list_view);
+
     d->window->filter_model = d->filter_model;
     d->window->name_filter  = d->name_filter;
     d->window->sorter       = d->sorter;
-    
+
     update_statusbar(d->window);
-    
+
     g_object_unref(d->grid_sel);
     g_object_unref(d->list_sel);
     g_free(d);
@@ -283,7 +313,7 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
 
     GtkMultiSelection *grid_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
     GtkMultiSelection *list_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
-    
+
     ModelUpdateData *d = g_new0(ModelUpdateData, 1);
     d->window = self;
     d->grid_sel = grid_sel;
@@ -291,7 +321,7 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
     d->filter_model = filtered;
     d->name_filter = filter;
     d->sorter = sorter;
-    
+
     g_idle_add(set_model_idle, d);
 
     /* Start file monitor for current directory */
