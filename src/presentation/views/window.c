@@ -42,6 +42,16 @@ static void on_rubberband_press(GtkGestureClick *g, int n,
     GtkWidget *picked = gtk_widget_pick(view, x, y, GTK_PICK_DEFAULT);
     if (picked != view) return; /* ضغط على عنصر — لا نُفعّل */
 
+    /* إلغاء تحديد جميع العناصر عند النقر على منطقة فارغة */
+    const char *visible = gtk_stack_get_visible_child_name(GTK_STACK(self->view_stack));
+    GtkSelectionModel *sel = NULL;
+    if (g_strcmp0(visible, "list") == 0) {
+        sel = GTK_SELECTION_MODEL(self->list_sel);
+    } else {
+        sel = GTK_SELECTION_MODEL(self->grid_sel);
+    }
+    if (sel) gtk_selection_model_unselect_all(sel);
+
     self->rubberband_active = TRUE;
     self->rubberband_x0 = x;
     self->rubberband_y0 = y;
