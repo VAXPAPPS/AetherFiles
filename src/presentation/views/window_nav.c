@@ -151,6 +151,10 @@ static void on_selection_changed(GtkSelectionModel *model, guint pos, guint n_it
 static gboolean set_model_idle(gpointer user_data) {
     ModelUpdateData *d = user_data;
 
+    /* أولاً: اجعل الـ views يشير لـ NULL لتجنب الوصول لموارد محررة */
+    gtk_grid_view_set_model(GTK_GRID_VIEW(d->window->grid_view), NULL);
+    gtk_column_view_set_model(GTK_COLUMN_VIEW(d->window->list_view), NULL);
+
     /* فصل الإشارات القديمة وتحرير النماذج السابقة */
     if (d->window->grid_sel) {
         g_signal_handlers_disconnect_by_func(d->window->grid_sel,
@@ -165,6 +169,7 @@ static gboolean set_model_idle(gpointer user_data) {
         g_clear_object(&d->window->list_sel);
     }
     if (d->window->filter_model) {
+        d->window->filter_model = NULL;
         g_object_unref(d->window->filter_model);
     }
 
@@ -193,6 +198,7 @@ static gboolean set_model_idle(gpointer user_data) {
     g_free(d);
     return G_SOURCE_REMOVE;
 }
+
 
 /* ── صلاحيات الجلسة: TRUE بعد أول موافقة من المستخدم ── */
 static gboolean s_session_elevated = FALSE;

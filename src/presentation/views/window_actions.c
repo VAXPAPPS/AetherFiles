@@ -1,5 +1,6 @@
 #include "window_private.h"
 #include <glib/gi18n.h>
+#include <string.h>
 
 /* ── دالة مشتركة لإعادة التحميل بعد العملية المحمية ── */
 static void on_privileged_action_done(GObject *src, GAsyncResult *res, gpointer ud) {
@@ -134,26 +135,131 @@ void on_select_all_clicked(GtkButton *btn, gpointer user_data) {
     }
 }
 
+/* ── بيانات حوار التعارض ── */
+typedef struct {
+    AetherWindow *win;
+    char         *dest_dir;
+    GPtrArray    *conflict_names; /* أسماء الملفات المتعارضة */
+} ConflictData;
+
+static void conflict_data_free(ConflictData *d) {
+    g_free(d->dest_dir);
+    g_ptr_array_free(d->conflict_names, TRUE);
+    g_free(d);
+}
+
+/* احتفظ بالنسختين: أضف "(copy)", "(copy 2)", ... حتى لا يوجد تعارض */
+static void paste_keep_both(AetherWindow *win, const char *dest_dir) {
+    aether_clipboard_paste_keep_both(win->clipboard, dest_dir);
+    load_directory(win, win->current_path);
+}
+
+
+static void on_conflict_response(GtkDialog *dlg, int response, gpointer user_data) {
+    ConflictData *d = user_data;
+    AetherWindow *win = d->win;
+    gtk_window_destroy(GTK_WINDOW(dlg));
+
+    if (response == GTK_RESPONSE_ACCEPT) {
+        /* Replace: لصق مع استبدال */
+        if (win->progress_spinner) gtk_spinner_start(GTK_SPINNER(win->progress_spinner));
+        aether_clipboard_paste_with_flags(win->clipboard, d->dest_dir,
+                                          G_FILE_COPY_OVERWRITE,
+                                          on_paste_done, win);
+    } else if (response == GTK_RESPONSE_YES) {
+        /* Keep Both: انسخ مع تغيير الاسم */
+        paste_keep_both(win, d->dest_dir);
+    }
+    /* Cancel: لا شيء */
+
+    conflict_data_free(d);
+}
+
+static void show_conflict_dialog(AetherWindow *win, const char *dest_dir,
+                                  GPtrArray *conflicts) {
+    /* بناء قائمة الأسماء */
+    GString *names_str = g_string_new("");
+    guint show = MIN(conflicts->len, 5);
+    for (guint i = 0; i < show; i++) {
+        if (i > 0) g_string_append(names_str, "\n");
+        g_string_append_printf(names_str, "• %s",
+                               (char *)g_ptr_array_index(conflicts, i));
+    }
+    if (conflicts->len > 5)
+        g_string_append_printf(names_str, "\n… and %u more",
+                               conflicts->len - 5);
+
+    /* بناء الرسالة */
+    const char *op_word = (aether_clipboard_get_op(win->clipboard) == AETHER_CLIPBOARD_COPY)
+                          ? "Copying" : "Moving";
+    char *msg = g_strdup_printf(
+        "%s %u item%s to a location where item%s with the same name already exist%s.\n\n"
+        "%s\n\n"
+        "What would you like to do?",
+        op_word,
+        conflicts->len,
+        conflicts->len > 1 ? "s" : "",
+        conflicts->len > 1 ? "s" : "",
+        conflicts->len > 1 ? "" : "s",
+        names_str->str);
+    g_string_free(names_str, TRUE);
+
+    GtkWidget *dlg = gtk_message_dialog_new(
+        GTK_WINDOW(win),
+        GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+        GTK_MESSAGE_QUESTION,
+        GTK_BUTTONS_NONE,
+        "File Conflict");
+    gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dlg), "%s", msg);
+    g_free(msg);
+
+    gtk_dialog_add_button(GTK_DIALOG(dlg), "Cancel",       GTK_RESPONSE_CANCEL);
+    gtk_dialog_add_button(GTK_DIALOG(dlg), "Keep Both",    GTK_RESPONSE_YES);
+    GtkWidget *replace_btn = gtk_dialog_add_button(GTK_DIALOG(dlg), "Replace", GTK_RESPONSE_ACCEPT);
+    gtk_widget_add_css_class(replace_btn, "destructive-action");
+    gtk_dialog_set_default_response(GTK_DIALOG(dlg), GTK_RESPONSE_ACCEPT);
+
+    ConflictData *d = g_new0(ConflictData, 1);
+    d->win            = win;
+    d->dest_dir       = g_strdup(dest_dir);
+    d->conflict_names = conflicts; /* يأخذ ملكية المصفوفة */
+
+    g_signal_connect(dlg, "response", G_CALLBACK(on_conflict_response), d);
+    gtk_window_present(GTK_WINDOW(dlg));
+}
+
 void on_paste_toolbar_clicked(GtkButton *btn, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
     (void)btn;
     if (!self->current_path) return;
     if (!aether_clipboard_has_content(self->clipboard)) return;
-    
-    if (self->progress_spinner) gtk_spinner_start(GTK_SPINNER(self->progress_spinner));
-    aether_clipboard_paste(self->clipboard, self->current_path,
-        on_paste_done, self);
+
+    /* فحص التعارضات أولاً */
+    GPtrArray *conflicts = aether_clipboard_find_conflicts(
+                               self->clipboard, self->current_path);
+    if (conflicts->len > 0) {
+        /* أظهر حوار التعارض — يتولى الحوار تنفيذ العملية بعد الاختيار */
+        show_conflict_dialog(self, self->current_path, conflicts);
+    } else {
+        g_ptr_array_free(conflicts, TRUE);
+        if (self->progress_spinner) gtk_spinner_start(GTK_SPINNER(self->progress_spinner));
+        aether_clipboard_paste(self->clipboard, self->current_path,
+            on_paste_done, self);
+    }
 }
 
 void on_paste_done(GObject *src, GAsyncResult *res, gpointer ud) {
+    (void)src;
     AetherWindow *w = AETHER_WINDOW(ud);
     if (w->progress_spinner) gtk_spinner_stop(GTK_SPINNER(w->progress_spinner));
-    
+
     GError *err = NULL;
     aether_clipboard_paste_finish(w->clipboard, res, &err);
     if (err) { g_printerr("Paste error: %s\n", err->message); g_error_free(err); }
     else load_directory(w, w->current_path);
 }
+
+
 
 void on_sort_mode_changed(GtkDropDown *dropdown, GParamSpec *pspec,
                                   gpointer user_data)
@@ -293,8 +399,14 @@ gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
     aether_clipboard_set(w->clipboard, paths, op);
     g_strfreev(paths);
     
-    if (w->progress_spinner) gtk_spinner_start(GTK_SPINNER(w->progress_spinner));
-    aether_clipboard_paste(w->clipboard, w->current_path, on_paste_done, w);
+    GPtrArray *conflicts = aether_clipboard_find_conflicts(w->clipboard, w->current_path);
+    if (conflicts->len > 0) {
+        show_conflict_dialog(w, w->current_path, conflicts);
+    } else {
+        g_ptr_array_free(conflicts, TRUE);
+        if (w->progress_spinner) gtk_spinner_start(GTK_SPINNER(w->progress_spinner));
+        aether_clipboard_paste(w->clipboard, w->current_path, on_paste_done, w);
+    }
     
     return TRUE;
 }
@@ -396,6 +508,204 @@ gboolean on_item_drop_accept(GtkDropTarget *target, GdkDrop *drop, gpointer user
     return TRUE;
 }
 
+typedef struct {
+    AetherWindow *win;
+    char         *dest_dir;
+    GPtrArray    *src_paths;      /* GPtrArray of char* (takes ownership) */
+    GPtrArray    *conflict_names; /* GPtrArray of char* (takes ownership) */
+} DnDConflictData;
+
+static void dnd_conflict_data_free(DnDConflictData *d) {
+    g_free(d->dest_dir);
+    g_ptr_array_free(d->src_paths, TRUE);
+    g_ptr_array_free(d->conflict_names, TRUE);
+    g_free(d);
+}
+
+static void execute_dnd_move(AetherWindow *win, const char *dest_dir, GPtrArray *src_paths, GFileCopyFlags flags) {
+    GFile *dest_gdir = g_file_new_for_path(dest_dir);
+
+    for (guint i = 0; i < src_paths->len; i++) {
+        const char *src_path = g_ptr_array_index(src_paths, i);
+        if (!src_path) continue;
+
+        GFile *src = g_file_new_for_path(src_path);
+        char *basename = g_file_get_basename(src);
+        GFile *dest_file = g_file_get_child(dest_gdir, basename);
+        GError *err = NULL;
+
+        g_file_move(src, dest_file, flags, NULL, NULL, NULL, &err);
+        if (err) {
+            g_printerr("DnD move error: %s\n", err->message);
+            g_error_free(err);
+        }
+
+        g_object_unref(dest_file);
+        g_free(basename);
+        g_object_unref(src);
+    }
+    g_object_unref(dest_gdir);
+
+    aether_window_reload(win);
+}
+
+static void execute_dnd_move_keep_both(AetherWindow *win, const char *dest_dir, GPtrArray *src_paths) {
+    GFile *dest_gdir = g_file_new_for_path(dest_dir);
+
+    for (guint i = 0; i < src_paths->len; i++) {
+        const char *src_path = g_ptr_array_index(src_paths, i);
+        if (!src_path) continue;
+
+        GFile *src = g_file_new_for_path(src_path);
+        char *basename = g_file_get_basename(src);
+
+        GFile *dest_check = g_file_new_for_path(g_build_filename(dest_dir, basename, NULL));
+        gboolean conflict = g_file_query_exists(dest_check, NULL);
+        g_object_unref(dest_check);
+
+        char *dest_file_path = NULL;
+        if (conflict) {
+            char *dot = strrchr(basename, '.');
+            char *name_part = dot ? g_strndup(basename, dot - basename) : g_strdup(basename);
+            const char *ext = dot ? dot : "";
+
+            int counter = 0;
+            while (TRUE) {
+                char *candidate;
+                if (counter == 0)
+                    candidate = g_strdup_printf("%s (copy)%s", name_part, ext);
+                else
+                    candidate = g_strdup_printf("%s (copy %d)%s", name_part, counter + 1, ext);
+
+                dest_file_path = g_build_filename(dest_dir, candidate, NULL);
+                g_free(candidate);
+
+                GFile *test = g_file_new_for_path(dest_file_path);
+                gboolean exists = g_file_query_exists(test, NULL);
+                g_object_unref(test);
+
+                if (!exists) break;
+                g_free(dest_file_path);
+                dest_file_path = NULL;
+                counter++;
+            }
+            g_free(name_part);
+        } else {
+            dest_file_path = g_build_filename(dest_dir, basename, NULL);
+        }
+
+        GFile *dest_file = g_file_new_for_path(dest_file_path);
+        GError *err = NULL;
+        g_file_move(src, dest_file, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+        if (err) {
+            g_printerr("DnD keep-both error: %s\n", err->message);
+            g_error_free(err);
+        }
+
+        g_object_unref(dest_file);
+        g_free(dest_file_path);
+        g_free(basename);
+        g_object_unref(src);
+    }
+    g_object_unref(dest_gdir);
+
+    aether_window_reload(win);
+}
+
+static void on_dnd_conflict_response(GtkDialog *dlg, int response, gpointer user_data) {
+    DnDConflictData *d = user_data;
+    AetherWindow *win = d->win;
+    gtk_window_destroy(GTK_WINDOW(dlg));
+
+    if (response == GTK_RESPONSE_ACCEPT) {
+        /* Replace: move with G_FILE_COPY_OVERWRITE */
+        execute_dnd_move(win, d->dest_dir, d->src_paths, G_FILE_COPY_OVERWRITE);
+    } else if (response == GTK_RESPONSE_YES) {
+        /* Keep Both: move and rename if conflict */
+        execute_dnd_move_keep_both(win, d->dest_dir, d->src_paths);
+    }
+    /* Cancel: do nothing */
+
+    dnd_conflict_data_free(d);
+}
+
+void aether_window_handle_dnd_move(AetherWindow *win, const char *dest_path, GPtrArray *src_paths) {
+    if (!dest_path || !src_paths || src_paths->len == 0) return;
+
+    /* فحص التعارضات أولاً */
+    GPtrArray *conflicts = g_ptr_array_new_with_free_func(g_free);
+    for (guint i = 0; i < src_paths->len; i++) {
+        const char *src_path = g_ptr_array_index(src_paths, i);
+        if (!src_path) continue;
+
+        GFile *src = g_file_new_for_path(src_path);
+        char *basename = g_file_get_basename(src);
+        char *dest_file_path = g_build_filename(dest_path, basename, NULL);
+        GFile *dest_file = g_file_new_for_path(dest_file_path);
+
+        if (g_file_query_exists(dest_file, NULL)) {
+            g_ptr_array_add(conflicts, g_strdup(basename));
+        }
+
+        g_object_unref(dest_file);
+        g_free(dest_file_path);
+        g_free(basename);
+        g_object_unref(src);
+    }
+
+    if (conflicts->len > 0) {
+        /* أظهر حوار التعارض */
+        GString *names_str = g_string_new("");
+        guint show = MIN(conflicts->len, 5);
+        for (guint i = 0; i < show; i++) {
+            if (i > 0) g_string_append(names_str, "\n");
+            g_string_append_printf(names_str, "• %s", (char *)g_ptr_array_index(conflicts, i));
+        }
+        if (conflicts->len > 5) {
+            g_string_append_printf(names_str, "\n… and %u more", conflicts->len - 5);
+        }
+
+        char *msg = g_strdup_printf(
+            "Moving %u item%s to a location where item%s with the same name already exist%s.\n\n"
+            "%s\n\nWhat would you like to do?",
+            conflicts->len,
+            conflicts->len > 1 ? "s" : "",
+            conflicts->len > 1 ? "s" : "",
+            conflicts->len > 1 ? "" : "s",
+            names_str->str);
+        g_string_free(names_str, TRUE);
+
+        GtkWidget *dlg = gtk_message_dialog_new(
+            GTK_WINDOW(win),
+            GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+            GTK_MESSAGE_QUESTION,
+            GTK_BUTTONS_NONE,
+            "File Conflict");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dlg), "%s", msg);
+        g_free(msg);
+
+        gtk_dialog_add_button(GTK_DIALOG(dlg), "Cancel",    GTK_RESPONSE_CANCEL);
+        gtk_dialog_add_button(GTK_DIALOG(dlg), "Keep Both", GTK_RESPONSE_YES);
+        GtkWidget *rb = gtk_dialog_add_button(GTK_DIALOG(dlg), "Replace", GTK_RESPONSE_ACCEPT);
+        gtk_widget_add_css_class(rb, "destructive-action");
+        gtk_dialog_set_default_response(GTK_DIALOG(dlg), GTK_RESPONSE_ACCEPT);
+
+        DnDConflictData *d = g_new0(DnDConflictData, 1);
+        d->win = win;
+        d->dest_dir = g_strdup(dest_path);
+        d->src_paths = src_paths; /* takes ownership */
+        d->conflict_names = conflicts; /* takes ownership */
+
+        g_signal_connect(dlg, "response", G_CALLBACK(on_dnd_conflict_response), d);
+        gtk_window_present(GTK_WINDOW(dlg));
+    } else {
+        g_ptr_array_free(conflicts, TRUE);
+        /* تنفيذ النقل مباشرة */
+        execute_dnd_move(win, dest_path, src_paths, G_FILE_COPY_NONE);
+        g_ptr_array_free(src_paths, TRUE);
+    }
+}
+
 gboolean on_item_drop(GtkDropTarget *target, const GValue *value, double x, double y, gpointer user_data) {
     (void)target; (void)x; (void)y;
     GtkListItem *list_item = GTK_LIST_ITEM(user_data);
@@ -408,12 +718,16 @@ gboolean on_item_drop(GtkDropTarget *target, const GValue *value, double x, doub
     const char *dest_path = aether_file_entity_get_path(entity);
     if (!dest_path) return FALSE;
 
+    GtkWidget *box = gtk_list_item_get_child(list_item);
+    GtkWidget *root = box ? GTK_WIDGET(gtk_widget_get_root(box)) : NULL;
+    if (!root || !AETHER_IS_WINDOW(root)) return FALSE;
+    AetherWindow *win = AETHER_WINDOW(root);
+
     GdkFileList *file_list = g_value_get_boxed(value);
     if (!file_list) return FALSE;
 
     GSList *files = gdk_file_list_get_files(file_list);
-    GFile *dest_dir = g_file_new_for_path(dest_path);
-    gboolean success = TRUE;
+    GPtrArray *src_paths = g_ptr_array_new_with_free_func(g_free);
 
     for (GSList *l = files; l != NULL; l = l->next) {
         GFile *src = G_FILE(l->data);
@@ -436,30 +750,18 @@ gboolean on_item_drop(GtkDropTarget *target, const GValue *value, double x, doub
             g_free(src_with_slash);
         }
 
-        char *basename = g_file_get_basename(src);
-        GFile *dest_file = g_file_get_child(dest_dir, basename);
-        GError *err = NULL;
-
-        g_file_move(src, dest_file, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
-        if (err) {
-            g_printerr("DnD error: Error moving file %s: %s\n", dest_path, err->message);
-            g_error_free(err);
-            success = FALSE;
+        if (src_path) {
+            g_ptr_array_add(src_paths, src_path);
         }
-        g_object_unref(dest_file);
-        g_free(basename);
-        g_free(src_path);
-    }
-    g_object_unref(dest_dir);
-    g_slist_free(files);
-
-    GtkWidget *box = gtk_list_item_get_child(list_item);
-    GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(box));
-    if (root && AETHER_IS_WINDOW(root)) {
-        aether_window_reload(AETHER_WINDOW(root));
     }
 
-    return success;
+    if (src_paths->len > 0) {
+        aether_window_handle_dnd_move(win, dest_path, src_paths);
+    } else {
+        g_ptr_array_free(src_paths, TRUE);
+    }
+
+    return TRUE;
 }
 
 gboolean on_undo_shortcut(GtkWidget *w, GVariant *a, gpointer ud) {

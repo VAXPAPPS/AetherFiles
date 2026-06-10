@@ -139,121 +139,273 @@ static gboolean on_sidebar_row_drop_accept(GtkDropTarget *target, GdkDrop *drop,
 }
 
 typedef struct {
-    GPtrArray *deb_paths;
+    GPtrArray    *deb_paths;
     AetherWindow *win;
+    GtkWidget    *dialog;       /* نافذة التقدم */
+    GtkWidget    *progress_bar;
+    GtkWidget    *status_lbl;
+    GtkWidget    *spinner;
+    guint         pulse_id;     /* معرّف مؤقت النبض */
 } InstallData;
+
+/* ── تحديث العرض من الـ main thread بعد اكتمال التثبيت ── */
+typedef struct {
+    AetherWindow *win;
+    GtkWidget    *dialog;
+    gboolean      success;
+} InstallDoneData;
+
+static gboolean on_install_done_idle(gpointer user_data) {
+    InstallDoneData *d = user_data;
+
+    /* أغلق نافذة التقدم */
+    if (d->dialog && GTK_IS_WIDGET(d->dialog))
+        gtk_window_destroy(GTK_WINDOW(d->dialog));
+
+    if (d->success && d->win && AETHER_IS_WINDOW(d->win)) {
+        /* حدّث مستودع التطبيقات ثم انتقل لصفحة Apps */
+        aether_app_repository_load_apps(d->win->app_repo);
+        show_apps_view(d->win);
+    }
+
+    g_free(d);
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean pulse_progress(gpointer user_data) {
+    InstallData *data = user_data;
+    if (data->progress_bar && GTK_IS_WIDGET(data->progress_bar))
+        gtk_progress_bar_pulse(GTK_PROGRESS_BAR(data->progress_bar));
+    return G_SOURCE_CONTINUE;
+}
 
 static void on_install_process_exited(GObject *source_object, GAsyncResult *res, gpointer user_data) {
     InstallData *data = user_data;
     GSubprocess *proc = G_SUBPROCESS(source_object);
     GError *err = NULL;
     g_subprocess_wait_finish(proc, res, &err);
+
+    gboolean success = FALSE;
     if (err) {
-        g_printerr("Install failed: %s\n", err->message);
+        g_printerr("Install wait failed: %s\n", err->message);
         g_error_free(err);
     } else {
-        if (g_subprocess_get_if_exited(proc) && g_subprocess_get_exit_status(proc) == 0) {
-            g_print("Installation successful!\n");
-            if (data && data->win && data->win->app_repo) {
-                aether_app_repository_load_apps(data->win->app_repo);
+        int exit_code = g_subprocess_get_if_exited(proc)
+                        ? g_subprocess_get_exit_status(proc) : -1;
+        success = (exit_code == 0);
+        if (!success) {
+            /* اقرأ stderr لمعرفة سبب الفشل */
+            GInputStream *stderr_stream = g_subprocess_get_stderr_pipe(proc);
+            if (stderr_stream) {
+                char buf[2048] = {0};
+                gsize nread = 0;
+                g_input_stream_read_all(stderr_stream, buf, sizeof(buf) - 1,
+                                        &nread, NULL, NULL);
+                if (nread > 0)
+                    g_printerr("Install stderr: %s\n", buf);
             }
-        } else {
-            g_printerr("Installation failed or exited with error.\n");
+            g_printerr("Installation exited with code %d.\n", exit_code);
         }
     }
-    
-    if (data) {
-        g_ptr_array_free(data->deb_paths, TRUE);
-        g_free(data);
+
+    /* إيقاف مؤقت النبض */
+    if (data->pulse_id) {
+        g_source_remove(data->pulse_id);
+        data->pulse_id = 0;
     }
+
+    /* أرسل النتيجة للـ main thread */
+    InstallDoneData *done = g_new0(InstallDoneData, 1);
+    done->win     = data->win;
+    done->dialog  = data->dialog;
+    done->success = success;
+    g_idle_add(on_install_done_idle, done);
+
+    g_ptr_array_free(data->deb_paths, TRUE);
+    g_free(data);
     g_object_unref(proc);
+}
+
+/* ── التبديل من شاشة كلمة المرور إلى شاشة التقدم ── */
+static void switch_to_progress_view(GtkWidget *dialog, InstallData *data) {
+    GtkWidget *old_child = gtk_window_get_child(GTK_WINDOW(dialog));
+    if (old_child) gtk_window_set_child(GTK_WINDOW(dialog), NULL);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+    gtk_widget_set_margin_start(box, 24);
+    gtk_widget_set_margin_end(box, 24);
+    gtk_widget_set_margin_top(box, 24);
+    gtk_widget_set_margin_bottom(box, 24);
+
+    /* أيقونة تثبيت */
+    GtkWidget *icon = gtk_image_new_from_icon_name("system-software-install-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), 48);
+    gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(box), icon);
+
+    GtkWidget *title = gtk_label_new("Installing packages…");
+    gtk_widget_add_css_class(title, "title-4");
+    gtk_widget_set_halign(title, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(box), title);
+
+    /* Progress bar */
+    GtkWidget *pbar = gtk_progress_bar_new();
+    gtk_progress_bar_set_pulse_step(GTK_PROGRESS_BAR(pbar), 0.05);
+    gtk_widget_set_hexpand(pbar, TRUE);
+    gtk_box_append(GTK_BOX(box), pbar);
+    data->progress_bar = pbar;
+
+    /* Spinner */
+    GtkWidget *spinner = gtk_spinner_new();
+    gtk_spinner_start(GTK_SPINNER(spinner));
+    gtk_widget_set_halign(spinner, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(box), spinner);
+    data->spinner = spinner;
+
+    GtkWidget *hint = gtk_label_new("Please wait, do not close this window.");
+    gtk_widget_add_css_class(hint, "dim-label");
+    gtk_widget_set_halign(hint, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(box), hint);
+
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+    gtk_window_set_deletable(GTK_WINDOW(dialog), FALSE);
+
+    /* ابدأ نبض الـ progress bar كل 150ms */
+    data->pulse_id = g_timeout_add(150, pulse_progress, data);
 }
 
 static void on_install_password_submit(GtkWidget *widget, gpointer user_data) {
     (void)user_data;
     GtkWidget *dialog = gtk_widget_get_ancestor(widget, GTK_TYPE_WINDOW);
-    GtkWidget *entry = g_object_get_data(G_OBJECT(dialog), "pwd-entry");
-    InstallData *data = g_object_get_data(G_OBJECT(dialog), "install-data");
-    
+    GtkWidget *entry  = g_object_get_data(G_OBJECT(dialog), "pwd-entry");
+    InstallData *data  = g_object_get_data(G_OBJECT(dialog), "install-data");
+
     const char *pwd = gtk_editable_get_text(GTK_EDITABLE(entry));
     if (!pwd || strlen(pwd) == 0) return;
-    
+
+    /* بناء الأمر: sudo -S env DEBIAN_FRONTEND=noninteractive apt-get install -y */
     GPtrArray *cmd = g_ptr_array_new_with_free_func(g_free);
     g_ptr_array_add(cmd, g_strdup("sudo"));
     g_ptr_array_add(cmd, g_strdup("-S"));
+    g_ptr_array_add(cmd, g_strdup("-E"));
+    g_ptr_array_add(cmd, g_strdup("env"));
+    g_ptr_array_add(cmd, g_strdup("DEBIAN_FRONTEND=noninteractive"));
     g_ptr_array_add(cmd, g_strdup("apt-get"));
     g_ptr_array_add(cmd, g_strdup("install"));
     g_ptr_array_add(cmd, g_strdup("-y"));
-    for (guint i = 0; i < data->deb_paths->len; i++) {
+    g_ptr_array_add(cmd, g_strdup("--allow-downgrades"));
+    g_ptr_array_add(cmd, g_strdup("--fix-broken"));
+    for (guint i = 0; i < data->deb_paths->len; i++)
         g_ptr_array_add(cmd, g_strdup(g_ptr_array_index(data->deb_paths, i)));
-    }
     g_ptr_array_add(cmd, NULL);
-    
+
     GError *err = NULL;
-    GSubprocess *proc = g_subprocess_newv((const char * const *)cmd->pdata,
-        G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE,
+    GSubprocess *proc = g_subprocess_newv(
+        (const char * const *)cmd->pdata,
+        G_SUBPROCESS_FLAGS_STDIN_PIPE |
+        G_SUBPROCESS_FLAGS_STDOUT_PIPE |
+        G_SUBPROCESS_FLAGS_STDERR_PIPE,
         &err);
-        
+
     if (proc) {
+        /* أرسل كلمة المرور لـ sudo */
         char *pwd_nl = g_strdup_printf("%s\n", pwd);
         GOutputStream *stdin_stream = g_subprocess_get_stdin_pipe(proc);
         g_output_stream_write_all(stdin_stream, pwd_nl, strlen(pwd_nl), NULL, NULL, NULL);
         g_output_stream_close(stdin_stream, NULL, NULL);
         g_free(pwd_nl);
-        
+
+        /* احفظ مرجع النافذة في البيانات */
+        data->dialog = dialog;
+
+        /* بدّل الحوار لشاشة التقدم */
+        switch_to_progress_view(dialog, data);
+
         g_subprocess_wait_async(proc, NULL, on_install_process_exited, data);
     } else {
-        g_printerr("Failed to spawn sudo: %s\n", err->message);
+        g_printerr("Failed to spawn sudo/dpkg: %s\n", err->message);
         g_error_free(err);
         g_ptr_array_free(data->deb_paths, TRUE);
         g_free(data);
+        gtk_window_destroy(GTK_WINDOW(dialog));
     }
-    
     g_ptr_array_free(cmd, TRUE);
-    gtk_window_destroy(GTK_WINDOW(dialog));
 }
 
 static void show_install_auth_dialog(AetherWindow *win, GPtrArray *deb_paths) {
     GtkWidget *dialog = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(dialog), "Authentication Required");
+    gtk_window_set_title(GTK_WINDOW(dialog), "Install Package");
     gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(win));
     gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(dialog), 300, 150);
-    
-    GtkCssProvider *provider = gtk_css_provider_new();
-    gtk_css_provider_load_from_string(provider, "window { background-color: rgba(0, 0, 0, 0.3); }");
-    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    g_object_unref(provider);
-    
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_start(box, 16);
-    gtk_widget_set_margin_end(box, 16);
-    gtk_widget_set_margin_top(box, 16);
-    gtk_widget_set_margin_bottom(box, 16);
-    
-    GtkWidget *lbl = gtk_label_new("Enter administrator password to install packages:");
-    gtk_label_set_wrap(GTK_LABEL(lbl), TRUE);
-    
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 360, -1);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 14);
+    gtk_widget_set_margin_start(box, 24);
+    gtk_widget_set_margin_end(box, 24);
+    gtk_widget_set_margin_top(box, 24);
+    gtk_widget_set_margin_bottom(box, 24);
+
+    /* أيقونة */
+    GtkWidget *icon = gtk_image_new_from_icon_name("system-software-install-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), 48);
+    gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(box), icon);
+
+    GtkWidget *title = gtk_label_new("Administrator Password Required");
+    gtk_widget_add_css_class(title, "title-4");
+    gtk_widget_set_halign(title, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(box), title);
+
+    /* عرض أسماء الحزم */
+    GString *pkg_names = g_string_new("");
+    for (guint i = 0; i < deb_paths->len; i++) {
+        char *base = g_path_get_basename(g_ptr_array_index(deb_paths, i));
+        if (i > 0) g_string_append(pkg_names, "\n");
+        g_string_append(pkg_names, base);
+        g_free(base);
+    }
+    GtkWidget *pkg_lbl = gtk_label_new(pkg_names->str);
+    gtk_widget_add_css_class(pkg_lbl, "dim-label");
+    gtk_label_set_wrap(GTK_LABEL(pkg_lbl), TRUE);
+    gtk_widget_set_halign(pkg_lbl, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(box), pkg_lbl);
+    g_string_free(pkg_names, TRUE);
+
+    GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_append(GTK_BOX(box), sep);
+
+    GtkWidget *pwd_lbl = gtk_label_new("Enter your password to continue:");
+    gtk_label_set_xalign(GTK_LABEL(pwd_lbl), 0.0f);
+    gtk_box_append(GTK_BOX(box), pwd_lbl);
+
     GtkWidget *entry = gtk_password_entry_new();
     gtk_password_entry_set_show_peek_icon(GTK_PASSWORD_ENTRY(entry), TRUE);
-    
-    GtkWidget *btn = gtk_button_new_with_label("Install");
-    gtk_widget_add_css_class(btn, "suggested-action");
-    
+    gtk_widget_set_hexpand(entry, TRUE);
+    gtk_box_append(GTK_BOX(box), entry);
+
+    /* أزرار */
+    GtkWidget *btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign(btn_box, GTK_ALIGN_END);
+    GtkWidget *cancel_btn = gtk_button_new_with_label("Cancel");
+    GtkWidget *install_btn = gtk_button_new_with_label("Install");
+    gtk_widget_add_css_class(install_btn, "suggested-action");
+    gtk_box_append(GTK_BOX(btn_box), cancel_btn);
+    gtk_box_append(GTK_BOX(btn_box), install_btn);
+    gtk_box_append(GTK_BOX(box), btn_box);
+
     InstallData *data = g_new0(InstallData, 1);
     data->deb_paths = deb_paths;
-    data->win = win;
-    
-    g_object_set_data(G_OBJECT(dialog), "pwd-entry", entry);
+    data->win       = win;
+    data->dialog    = NULL;
+    data->pulse_id  = 0;
+
+    g_object_set_data(G_OBJECT(dialog), "pwd-entry",    entry);
     g_object_set_data(G_OBJECT(dialog), "install-data", data);
-    
-    g_signal_connect(btn, "clicked", G_CALLBACK(on_install_password_submit), NULL);
-    g_signal_connect(entry, "activate", G_CALLBACK(on_install_password_submit), NULL);
-    
-    gtk_box_append(GTK_BOX(box), lbl);
-    gtk_box_append(GTK_BOX(box), entry);
-    gtk_box_append(GTK_BOX(box), btn);
-    
+
+    g_signal_connect(install_btn, "clicked",  G_CALLBACK(on_install_password_submit), NULL);
+    g_signal_connect(entry,       "activate", G_CALLBACK(on_install_password_submit), NULL);
+    g_signal_connect_swapped(cancel_btn, "clicked", G_CALLBACK(gtk_window_destroy), dialog);
+
     gtk_window_set_child(GTK_WINDOW(dialog), box);
     gtk_window_present(GTK_WINDOW(dialog));
 }
@@ -269,7 +421,6 @@ static gboolean on_sidebar_row_drop(GtkDropTarget *target, const GValue *value, 
     if (!file_list) return FALSE;
     
     GSList *files = gdk_file_list_get_files(file_list);
-    GFile *dest_dir = g_file_new_for_path(dest_path);
     gboolean success = TRUE;
     
     gboolean is_trash = g_strcmp0(dest_path, "trash:///") == 0;
@@ -298,40 +449,49 @@ static gboolean on_sidebar_row_drop(GtkDropTarget *target, const GValue *value, 
             g_ptr_array_free(deb_paths, TRUE);
         }
         
-        g_object_unref(dest_dir);
-        g_slist_free(files);
         return success;
     }
     
+    if (is_trash) {
+        for (GSList *l = files; l != NULL; l = l->next) {
+            GFile *src = G_FILE(l->data);
+            GError *err = NULL;
+            g_file_trash(src, NULL, &err);
+            if (err) {
+                g_printerr("Sidebar DnD error: Error trashing file: %s\n", err->message);
+                g_error_free(err);
+                success = FALSE;
+            }
+        }
+        
+        GtkWidget *win_widget = gtk_widget_get_ancestor(row, AETHER_TYPE_WINDOW);
+        if (win_widget) {
+            aether_window_reload(AETHER_WINDOW(win_widget));
+        }
+        return success;
+    }
+
+    /* Regular directory drop target: handle with conflict resolution */
+    GtkWidget *win_widget = gtk_widget_get_ancestor(row, AETHER_TYPE_WINDOW);
+    if (!win_widget) return FALSE;
+    AetherWindow *win = AETHER_WINDOW(win_widget);
+
+    GPtrArray *src_paths = g_ptr_array_new_with_free_func(g_free);
     for (GSList *l = files; l != NULL; l = l->next) {
         GFile *src = G_FILE(l->data);
-        GError *err = NULL;
-        
-        if (is_trash) {
-            g_file_trash(src, NULL, &err);
-        } else {
-            char *basename = g_file_get_basename(src);
-            GFile *dest_file = g_file_get_child(dest_dir, basename);
-            g_file_move(src, dest_file, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
-            g_object_unref(dest_file);
-            g_free(basename);
-        }
-        
-        if (err) {
-            g_printerr("Sidebar DnD error: Error moving file %s: %s\n", dest_path, err->message);
-            g_error_free(err);
-            success = FALSE;
+        char *src_path = g_file_get_path(src);
+        if (src_path) {
+            g_ptr_array_add(src_paths, src_path);
         }
     }
-    g_object_unref(dest_dir);
-    g_slist_free(files);
-    
-    GtkWidget *win_widget = gtk_widget_get_ancestor(row, AETHER_TYPE_WINDOW);
-    if (win_widget) {
-        aether_window_reload(AETHER_WINDOW(win_widget));
+
+    if (src_paths->len > 0) {
+        aether_window_handle_dnd_move(win, dest_path, src_paths);
+    } else {
+        g_ptr_array_free(src_paths, TRUE);
     }
     
-    return success;
+    return TRUE;
 }
 
 GtkWidget *make_sidebar_row(const char *name, const char *icon_name) {

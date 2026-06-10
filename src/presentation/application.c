@@ -177,6 +177,42 @@ static void on_paste_done(GObject *src, GAsyncResult *res, gpointer ud) {
     if (w) aether_window_reload(w);
 }
 
+/* ── بيانات حوار التعارض (من app.paste) ── */
+typedef struct {
+    AetherApplication *app;
+    char              *dest_dir;
+    GPtrArray         *conflict_names;
+} AppConflictData;
+
+static void app_conflict_data_free(AppConflictData *d) {
+    g_free(d->dest_dir);
+    g_ptr_array_free(d->conflict_names, TRUE);
+    g_free(d);
+}
+
+static void on_app_conflict_response(GtkDialog *dlg, int response, gpointer user_data) {
+    AppConflictData *d = user_data;
+    AetherApplication *app = d->app;
+    gtk_window_destroy(GTK_WINDOW(dlg));
+
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+
+    if (response == GTK_RESPONSE_ACCEPT) {
+        /* Replace */
+        if (win) aether_window_start_progress(win);
+        aether_clipboard_paste_with_flags(app->clipboard, d->dest_dir,
+                                          G_FILE_COPY_OVERWRITE,
+                                          on_paste_done, app);
+    } else if (response == GTK_RESPONSE_YES) {
+        /* Keep Both */
+        aether_clipboard_paste_keep_both(app->clipboard, d->dest_dir);
+        if (win) aether_window_reload(win);
+    }
+    /* Cancel: لا شيء */
+
+    app_conflict_data_free(d);
+}
+
 static void on_paste_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action; (void)parameter;
     AetherApplication *app = AETHER_APPLICATION(user_data);
@@ -184,9 +220,62 @@ static void on_paste_action(GSimpleAction *action, GVariant *parameter, gpointer
     if (!win || !aether_clipboard_has_content(app->clipboard)) return;
     const char *dest = aether_window_get_current_path(win);
     if (!dest) return;
-    
-    aether_window_start_progress(win);
-    aether_clipboard_paste(app->clipboard, dest, on_paste_done, app);
+
+    /* فحص التعارضات أولاً */
+    GPtrArray *conflicts = aether_clipboard_find_conflicts(app->clipboard, dest);
+    if (conflicts->len > 0) {
+        /* بناء رسالة الحوار */
+        GString *names_str = g_string_new("");
+        guint show = MIN(conflicts->len, 5);
+        for (guint i = 0; i < show; i++) {
+            if (i > 0) g_string_append(names_str, "\n");
+            g_string_append_printf(names_str, "• %s",
+                                   (char *)g_ptr_array_index(conflicts, i));
+        }
+        if (conflicts->len > 5)
+            g_string_append_printf(names_str, "\n… and %u more",
+                                   conflicts->len - 5);
+
+        const char *op_word = (aether_clipboard_get_op(app->clipboard)
+                               == AETHER_CLIPBOARD_COPY) ? "Copying" : "Moving";
+        char *msg = g_strdup_printf(
+            "%s %u item%s to a location where item%s with the same name already exist%s.\n\n"
+            "%s\n\nWhat would you like to do?",
+            op_word,
+            conflicts->len, conflicts->len > 1 ? "s" : "",
+            conflicts->len > 1 ? "s" : "",
+            conflicts->len > 1 ? "" : "s",
+            names_str->str);
+        g_string_free(names_str, TRUE);
+
+        GtkWidget *dlg = gtk_message_dialog_new(
+            GTK_WINDOW(win),
+            GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+            GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE,
+            "File Conflict");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dlg), "%s", msg);
+        g_free(msg);
+
+        gtk_dialog_add_button(GTK_DIALOG(dlg), "Cancel",    GTK_RESPONSE_CANCEL);
+        gtk_dialog_add_button(GTK_DIALOG(dlg), "Keep Both", GTK_RESPONSE_YES);
+        GtkWidget *rb = gtk_dialog_add_button(GTK_DIALOG(dlg), "Replace",
+                                              GTK_RESPONSE_ACCEPT);
+        gtk_widget_add_css_class(rb, "destructive-action");
+        gtk_dialog_set_default_response(GTK_DIALOG(dlg), GTK_RESPONSE_ACCEPT);
+
+        AppConflictData *d = g_new0(AppConflictData, 1);
+        d->app            = app;
+        d->dest_dir       = g_strdup(dest);
+        d->conflict_names = conflicts; /* يأخذ ملكية المصفوفة */
+
+        g_signal_connect(dlg, "response",
+                         G_CALLBACK(on_app_conflict_response), d);
+        gtk_window_present(GTK_WINDOW(dlg));
+    } else {
+        g_ptr_array_free(conflicts, TRUE);
+        aether_window_start_progress(win);
+        aether_clipboard_paste(app->clipboard, dest, on_paste_done, app);
+    }
 }
 
 /* ── rename ── */

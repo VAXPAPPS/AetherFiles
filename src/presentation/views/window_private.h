@@ -134,6 +134,7 @@ void on_open_terminal_clicked(GtkButton *btn, gpointer user_data);
 void on_select_all_clicked(GtkButton *btn, gpointer user_data);
 void on_paste_toolbar_clicked(GtkButton *btn, gpointer user_data);
 void on_paste_done(GObject *src, GAsyncResult *res, gpointer ud);
+void aether_window_handle_dnd_move(AetherWindow *win, const char *dest_path, GPtrArray *src_paths);
 void on_sort_mode_changed(GtkDropDown *dropdown, GParamSpec *pspec, gpointer user_data);
 void on_sort_dir_clicked(GtkButton *btn, gpointer user_data);
 void on_toggle_hidden(GSimpleAction *action, GVariant *param, gpointer user_data);
