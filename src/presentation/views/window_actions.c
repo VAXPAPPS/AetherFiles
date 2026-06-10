@@ -369,9 +369,31 @@ gboolean on_item_drop_accept(GtkDropTarget *target, GdkDrop *drop, gpointer user
     GtkListItem *list_item = GTK_LIST_ITEM(user_data);
     gpointer item = gtk_list_item_get_item(list_item);
     if (!item || !AETHER_IS_FILE_ENTITY(item)) return FALSE;
-    
+
     AetherFileEntity *entity = AETHER_FILE_ENTITY(item);
-    return aether_file_entity_is_directory(entity);
+    if (!aether_file_entity_is_directory(entity)) return FALSE;
+
+    /* رفض الإسقاط إذا كان المجلد الوجهة ضمن العناصر المسحوبة */
+    const char *dest_path = aether_file_entity_get_path(entity);
+    if (!dest_path) return FALSE;
+
+    GtkWidget *child = gtk_list_item_get_child(list_item);
+    GtkWidget *win_widget = child ? gtk_widget_get_ancestor(child, AETHER_TYPE_WINDOW) : NULL;
+    if (win_widget) {
+        AetherWindow *win = AETHER_WINDOW(win_widget);
+        GStrv sel = aether_window_get_selected_paths(win);
+        if (sel) {
+            for (int i = 0; sel[i] != NULL; i++) {
+                if (g_strcmp0(sel[i], dest_path) == 0) {
+                    g_strfreev(sel);
+                    return FALSE; /* الوجهة محددة — ارفض الإسقاط */
+                }
+            }
+            g_strfreev(sel);
+        }
+    }
+
+    return TRUE;
 }
 
 gboolean on_item_drop(GtkDropTarget *target, const GValue *value, double x, double y, gpointer user_data) {
@@ -379,26 +401,45 @@ gboolean on_item_drop(GtkDropTarget *target, const GValue *value, double x, doub
     GtkListItem *list_item = GTK_LIST_ITEM(user_data);
     gpointer item = gtk_list_item_get_item(list_item);
     if (!item || !AETHER_IS_FILE_ENTITY(item)) return FALSE;
-    
+
     AetherFileEntity *entity = AETHER_FILE_ENTITY(item);
     if (!aether_file_entity_is_directory(entity)) return FALSE;
-    
+
     const char *dest_path = aether_file_entity_get_path(entity);
     if (!dest_path) return FALSE;
-    
+
     GdkFileList *file_list = g_value_get_boxed(value);
     if (!file_list) return FALSE;
-    
+
     GSList *files = gdk_file_list_get_files(file_list);
     GFile *dest_dir = g_file_new_for_path(dest_path);
     gboolean success = TRUE;
-    
+
     for (GSList *l = files; l != NULL; l = l->next) {
         GFile *src = G_FILE(l->data);
+        char *src_path = g_file_get_path(src);
+
+        /* تخطّ الملف إذا كان مساره هو نفس مسار الوجهة (سحب مجلد إلى نفسه) */
+        if (src_path && g_strcmp0(src_path, dest_path) == 0) {
+            g_free(src_path);
+            continue;
+        }
+
+        /* تخطّ الملف إذا كانت الوجهة داخل الملف المصدر (نقل مجلد إلى داخل نفسه) */
+        if (src_path) {
+            char *src_with_slash = g_strdup_printf("%s/", src_path);
+            if (g_str_has_prefix(dest_path, src_with_slash)) {
+                g_free(src_with_slash);
+                g_free(src_path);
+                continue;
+            }
+            g_free(src_with_slash);
+        }
+
         char *basename = g_file_get_basename(src);
         GFile *dest_file = g_file_get_child(dest_dir, basename);
         GError *err = NULL;
-        
+
         g_file_move(src, dest_file, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
         if (err) {
             g_printerr("DnD error: Error moving file %s: %s\n", dest_path, err->message);
@@ -407,16 +448,17 @@ gboolean on_item_drop(GtkDropTarget *target, const GValue *value, double x, doub
         }
         g_object_unref(dest_file);
         g_free(basename);
+        g_free(src_path);
     }
     g_object_unref(dest_dir);
     g_slist_free(files);
-    
+
     GtkWidget *box = gtk_list_item_get_child(list_item);
     GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(box));
     if (root && AETHER_IS_WINDOW(root)) {
         aether_window_reload(AETHER_WINDOW(root));
     }
-    
+
     return success;
 }
 
