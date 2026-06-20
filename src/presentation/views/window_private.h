@@ -44,6 +44,7 @@ struct _AetherWindow {
     GtkWidget *btn_fwd;
     GtkWidget *btn_grid;
     GtkWidget *btn_list;
+    GtkWidget *btn_toggle_sidebar;
 
     GtkFilterListModel *filter_model;
     GtkCustomFilter    *name_filter;
@@ -158,6 +159,7 @@ void push_undo(AetherWindow *self, UndoOp op, const char *src, const char *dest)
 void do_undo(AetherWindow *self);
 void on_btn_back_clicked(GtkButton *btn, gpointer user_data);
 void on_btn_fwd_clicked(GtkButton *btn, gpointer user_data);
+void on_btn_toggle_sidebar_toggled(GtkToggleButton *btn, gpointer user_data);
 void on_view_switched(GtkButton *btn, gpointer user_data);
 void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
 void on_search_filter_changed(GtkDropDown *dropdown, GParamSpec *pspec, gpointer user_data);

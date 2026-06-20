@@ -36,7 +36,7 @@ paned > separator {
   background: rgba(0, 0, 0, 0);
   box-shadow: none;
   border: none;
-  min-height: 46px;
+  min-height: 22px;
 }
 
 .aether-sidebar headerbar .title {
@@ -126,7 +126,7 @@ headerbar.aether-header {
   background: rgba(0, 0, 0, 0.300);
   box-shadow: none;
   border: none;
-  min-height: 46px;
+  min-height: 22px;
 }
 
 /* ---------- Path Bar ---------- */
@@ -134,7 +134,7 @@ headerbar.aether-header {
   background: rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   padding: 0 4px;
-  min-height: 32px;
+  min-height: 22px;
 }
 
 .aether-pathbar button {
@@ -145,7 +145,7 @@ headerbar.aether-header {
   font-weight: 500;
   padding: 4px 8px;
   border-radius: 6px;
-  min-height: 28px;
+  min-height: 22px;
   transition: background 120ms ease, color 120ms ease;
 }
 
@@ -169,7 +169,7 @@ headerbar.aether-header {
 .aether-toolbar {
   background: rgb(255, 255, 255);
   padding: 6px 14px;
-  min-height: 44px;
+  min-height: 22px;
 }
 
 .aether-toolbar button {
@@ -180,7 +180,7 @@ headerbar.aether-header {
   font-weight: 500;
   padding: 5px 14px;
   margin: 0 2px;
-  min-height: 30px;
+  min-height: 22px;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 

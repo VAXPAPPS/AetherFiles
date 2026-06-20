@@ -82,6 +82,15 @@ void on_new_folder_response(GtkDialog *d, int response_id, gpointer ud) {
     gtk_window_destroy(GTK_WINDOW(d));
 }
 
+void on_btn_toggle_sidebar_toggled(GtkToggleButton *btn, gpointer user_data) {
+    AetherWindow *self = AETHER_WINDOW(user_data);
+    GtkWidget *sidebar = gtk_paned_get_start_child(GTK_PANED(self->split_view));
+    if (sidebar) {
+        gboolean active = gtk_toggle_button_get_active(btn);
+        gtk_widget_set_visible(sidebar, active);
+    }
+}
+
 void on_new_document_clicked(GtkButton *btn, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
     if (!self->current_path) return;

@@ -159,6 +159,51 @@ static void aether_window_class_init(AetherWindowClass *klass) {
     oc->dispose = aether_window_dispose;
 }
 
+static void draw_sidebar_toggle(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data) {
+    AetherWindow *self = AETHER_WINDOW(user_data);
+    gboolean active = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(self->btn_toggle_sidebar));
+    
+    double x = 3.5, y = 3.5, w = width - 7, h = height - 7, r = 1.5;
+    cairo_set_line_width(cr, 1.2);
+    
+    GdkRGBA color;
+    gtk_widget_get_color(GTK_WIDGET(area), &color);
+    cairo_set_source_rgba(cr, color.red, color.green, color.blue, color.alpha);
+    
+    // Draw rounded rectangle
+    cairo_move_to(cr, x + r, y);
+    cairo_line_to(cr, x + w - r, y);
+    cairo_arc(cr, x + w - r, y + r, r, -G_PI/2, 0);
+    cairo_line_to(cr, x + w, y + h - r);
+    cairo_arc(cr, x + w - r, y + h - r, r, 0, G_PI/2);
+    cairo_line_to(cr, x + r, y + h);
+    cairo_arc(cr, x + r, y + h - r, r, G_PI/2, G_PI);
+    cairo_line_to(cr, x, y + r);
+    cairo_arc(cr, x + r, y + r, r, G_PI, 3*G_PI/2);
+    cairo_stroke(cr);
+    
+    // Draw vertical separator
+    cairo_move_to(cr, x + w/3, y);
+    cairo_line_to(cr, x + w/3, y + h);
+    cairo_stroke(cr);
+    
+    if (active) {
+        cairo_move_to(cr, x + r, y);
+        cairo_line_to(cr, x + w/3, y);
+        cairo_line_to(cr, x + w/3, y + h);
+        cairo_line_to(cr, x + r, y + h);
+        cairo_arc(cr, x + r, y + h - r, r, G_PI/2, G_PI);
+        cairo_line_to(cr, x, y + r);
+        cairo_arc(cr, x + r, y + r, r, G_PI, 3*G_PI/2);
+        cairo_fill(cr);
+    } else {
+        cairo_move_to(cr, x + w/3 + 3, y + h/2 - 2.5);
+        cairo_line_to(cr, x + w/3 + 5.5, y + h/2);
+        cairo_line_to(cr, x + w/3 + 3, y + h/2 + 2.5);
+        cairo_stroke(cr);
+    }
+}
+
 static void on_hidden_toggled(GtkToggleButton *btn, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
     self->show_hidden = gtk_toggle_button_get_active(btn);
@@ -304,6 +349,18 @@ static void aether_window_init(AetherWindow *self) {
 
     /* Nav buttons */
     GtkWidget *nav_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    
+    self->btn_toggle_sidebar = gtk_toggle_button_new();
+    gtk_widget_add_css_class(self->btn_toggle_sidebar, "nav-btn");
+    
+    GtkWidget *sidebar_icon = gtk_drawing_area_new();
+    gtk_widget_set_size_request(sidebar_icon, 20, 20);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(sidebar_icon), draw_sidebar_toggle, self, NULL);
+    gtk_button_set_child(GTK_BUTTON(self->btn_toggle_sidebar), sidebar_icon);
+    
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(self->btn_toggle_sidebar), TRUE);
+    g_signal_connect(self->btn_toggle_sidebar, "toggled", G_CALLBACK(on_btn_toggle_sidebar_toggled), self);
+    
     self->btn_back = gtk_button_new_from_icon_name("go-previous-symbolic");
     self->btn_fwd  = gtk_button_new_from_icon_name("go-next-symbolic");
     gtk_widget_add_css_class(self->btn_back, "nav-btn");
@@ -312,6 +369,8 @@ static void aether_window_init(AetherWindow *self) {
     gtk_widget_set_sensitive(self->btn_fwd,  FALSE);
     g_signal_connect(self->btn_back, "clicked", G_CALLBACK(on_btn_back_clicked), self);
     g_signal_connect(self->btn_fwd,  "clicked", G_CALLBACK(on_btn_fwd_clicked),  self);
+    
+    gtk_box_append(GTK_BOX(nav_box), self->btn_toggle_sidebar);
     gtk_box_append(GTK_BOX(nav_box), self->btn_back);
     gtk_box_append(GTK_BOX(nav_box), self->btn_fwd);
     gtk_header_bar_pack_start(GTK_HEADER_BAR(content_header), nav_box);
