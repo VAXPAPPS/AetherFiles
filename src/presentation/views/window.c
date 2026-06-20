@@ -203,65 +203,12 @@ static void aether_window_init(AetherWindow *self) {
     GtkWidget *sidebar_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class(sidebar_box, "aether-sidebar");
 
-    GtkWidget *sidebar_header = gtk_header_bar_new();
-    gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(sidebar_header), FALSE);
-
-    GtkWidget *sidebar_icons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_widget_set_halign(sidebar_icons, GTK_ALIGN_CENTER);
-
-    /* 1. More actions */
-    GtkWidget *more_btn = gtk_menu_button_new();
-    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(more_btn), "view-more-symbolic");
-    gtk_widget_add_css_class(more_btn, "flat");
-
-    /* 2. Sort */
-    GtkWidget *sort_popover = gtk_popover_new();
-    GtkWidget *sort_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
-    gtk_widget_set_margin_start(sort_box, 12);
-    gtk_widget_set_margin_end(sort_box, 12);
-    gtk_widget_set_margin_top(sort_box, 12);
-    gtk_widget_set_margin_bottom(sort_box, 12);
-
-    const char *sort_opts[] = {"Name", "Size", "Type", "Date Modified", NULL};
-    GtkWidget *dropdown = gtk_drop_down_new_from_strings(sort_opts);
-    g_signal_connect(dropdown, "notify::selected", G_CALLBACK(on_sort_mode_changed), self);
-    GtkWidget *dir_btn = gtk_button_new_with_label("Reverse Order");
-    g_signal_connect(dir_btn, "clicked", G_CALLBACK(on_sort_dir_clicked), self);
-
-    gtk_box_append(GTK_BOX(sort_box), dropdown);
-    gtk_box_append(GTK_BOX(sort_box), dir_btn);
-    gtk_popover_set_child(GTK_POPOVER(sort_popover), sort_box);
-
-    self->sort_btn = gtk_menu_button_new();
-    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(self->sort_btn), self->sort_asc ? "view-sort-ascending-symbolic" : "view-sort-descending-symbolic");
-    gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->sort_btn), sort_popover);
-    gtk_widget_add_css_class(self->sort_btn, "flat");
-
-    /* 3. Show hidden files */
-    self->btn_hidden = gtk_toggle_button_new();
-    gtk_button_set_icon_name(GTK_BUTTON(self->btn_hidden), "view-reveal-symbolic");
-    gtk_widget_add_css_class(self->btn_hidden, "flat");
-    g_signal_connect(self->btn_hidden, "toggled", G_CALLBACK(on_hidden_toggled), self);
-
-    /* 4. Circular Progress Indicator */
-    self->progress_spinner = gtk_spinner_new();
-    gtk_widget_set_margin_start(self->progress_spinner, 4);
-    gtk_widget_set_margin_end(self->progress_spinner, 4);
-
-    gtk_box_append(GTK_BOX(sidebar_icons), more_btn);
-    gtk_box_append(GTK_BOX(sidebar_icons), self->sort_btn);
-    gtk_box_append(GTK_BOX(sidebar_icons), self->btn_hidden);
-    gtk_box_append(GTK_BOX(sidebar_icons), self->progress_spinner);
-
-    gtk_header_bar_set_title_widget(GTK_HEADER_BAR(sidebar_header), sidebar_icons);
-
     GtkWidget *sidebar_scrolled = gtk_scrolled_window_new();
     gtk_widget_set_vexpand(sidebar_scrolled, TRUE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sidebar_scrolled), self->sidebar_list);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sidebar_scrolled),
                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
 
-    gtk_box_append(GTK_BOX(sidebar_box), sidebar_header);
     gtk_box_append(GTK_BOX(sidebar_box), sidebar_scrolled);
 
     /* ══ Views ══ */
@@ -352,6 +299,7 @@ static void aether_window_init(AetherWindow *self) {
 
     /* ══ Content header ══ */
     GtkWidget *content_header = gtk_header_bar_new();
+    gtk_widget_add_css_class(content_header, "aether-header");
     gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(content_header), TRUE);
 
     /* Nav buttons */
@@ -401,7 +349,50 @@ static void aether_window_init(AetherWindow *self) {
     gtk_box_append(GTK_BOX(view_box), search_btn);
     gtk_header_bar_pack_end(GTK_HEADER_BAR(content_header), view_box);
 
-    /* Remove self->sort_btn assignment here since we already created it */    /* ══ Status bar ══ */
+    /* ══ Extra Actions (Moved from Sidebar) ══ */
+    GtkWidget *extra_icons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+
+    GtkWidget *more_btn = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(more_btn), "view-more-symbolic");
+    gtk_widget_add_css_class(more_btn, "flat");
+
+    GtkWidget *sort_popover = gtk_popover_new();
+    GtkWidget *sort_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_margin_start(sort_box, 12);
+    gtk_widget_set_margin_end(sort_box, 12);
+    gtk_widget_set_margin_top(sort_box, 12);
+    gtk_widget_set_margin_bottom(sort_box, 12);
+
+    const char *sort_opts[] = {"Name", "Size", "Type", "Date Modified", NULL};
+    GtkWidget *dropdown = gtk_drop_down_new_from_strings(sort_opts);
+    g_signal_connect(dropdown, "notify::selected", G_CALLBACK(on_sort_mode_changed), self);
+    GtkWidget *dir_btn = gtk_button_new_with_label("Reverse Order");
+    g_signal_connect(dir_btn, "clicked", G_CALLBACK(on_sort_dir_clicked), self);
+
+    gtk_box_append(GTK_BOX(sort_box), dropdown);
+    gtk_box_append(GTK_BOX(sort_box), dir_btn);
+    gtk_popover_set_child(GTK_POPOVER(sort_popover), sort_box);
+
+    self->sort_btn = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(self->sort_btn), self->sort_asc ? "view-sort-ascending-symbolic" : "view-sort-descending-symbolic");
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->sort_btn), sort_popover);
+    gtk_widget_add_css_class(self->sort_btn, "flat");
+
+    self->btn_hidden = gtk_toggle_button_new();
+    gtk_button_set_icon_name(GTK_BUTTON(self->btn_hidden), "view-reveal-symbolic");
+    gtk_widget_add_css_class(self->btn_hidden, "flat");
+    g_signal_connect(self->btn_hidden, "toggled", G_CALLBACK(on_hidden_toggled), self);
+
+    self->progress_spinner = gtk_spinner_new();
+    gtk_widget_set_margin_start(self->progress_spinner, 4);
+    gtk_widget_set_margin_end(self->progress_spinner, 4);
+
+    gtk_box_append(GTK_BOX(extra_icons), self->progress_spinner);
+    gtk_box_append(GTK_BOX(extra_icons), self->btn_hidden);
+    gtk_box_append(GTK_BOX(extra_icons), self->sort_btn);
+    gtk_box_append(GTK_BOX(extra_icons), more_btn);
+
+    gtk_header_bar_pack_end(GTK_HEADER_BAR(content_header), extra_icons);    /* ══ Status bar ══ */
     GtkWidget *statusbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(statusbar, "aether-statusbar");
     self->status_label = gtk_label_new("0 items");
@@ -434,8 +425,10 @@ static void aether_window_init(AetherWindow *self) {
     GtkWidget *content_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class(content_box, "aether-content");
     gtk_widget_set_hexpand(content_box, TRUE);
-    gtk_box_append(GTK_BOX(content_box), content_header);
     gtk_box_append(GTK_BOX(content_box), content_area);
+
+    /* تعيين شريط العنوان ليكون للنافذة بالكامل (يمتد فوق الشريط الجانبي) */
+    gtk_window_set_titlebar(GTK_WINDOW(self), content_header);
 
     /* ══ Split view ══ */
     self->split_view = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);

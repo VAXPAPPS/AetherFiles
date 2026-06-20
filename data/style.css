@@ -17,7 +17,6 @@ window.aether-window {
 /* ---------- Sidebar ---------- */
 .aether-sidebar {
   background: rgba(0, 0, 0, 0);
-  border-right: 1px solid rgba(0, 0, 0, 0);
   min-width: 200px;
 }
 
@@ -29,7 +28,6 @@ window.aether-window {
 .aether-sidebar headerbar {
   background: rgba(0, 0, 0, 0);
   box-shadow: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   min-height: 46px;
 }
 
@@ -93,7 +91,7 @@ window.aether-window {
 
 /* Sidebar separator */
 .aether-sidebar separator {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0);
   margin: 4px 12px;
   min-height: 1px;
 }
@@ -116,10 +114,9 @@ window.aether-window {
 }
 
 /* ---------- Main Content Header ---------- */
-.aether-content headerbar {
-  background: rgba(0, 0, 0, 0);
+headerbar.aether-header {
+  background: rgba(0, 0, 0, 0.300);
   box-shadow: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   min-height: 46px;
 }
 
@@ -127,7 +124,6 @@ window.aether-window {
 .aether-pathbar {
   background: rgba(255, 255, 255, 0.06);
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.10);
   padding: 0 4px;
   min-height: 32px;
 }
