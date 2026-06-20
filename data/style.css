@@ -130,7 +130,6 @@ headerbar.aether-header {
 
 .aether-pathbar button {
   background: transparent;
-  border: none;
   box-shadow: none;
   color: rgba(200, 220, 255, 0.80);
   font-size: 13px;
@@ -166,7 +165,6 @@ headerbar.aether-header {
 
 .aether-toolbar button {
   background: rgba(0, 0, 0, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 8px;
   color: rgba(200, 220, 255, 0.85);
   font-size: 12px;
@@ -344,7 +342,6 @@ columnview > child:selected {
 
 columnview header {
   background: rgba(10, 14, 30, 0.55);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 columnview header button {
@@ -394,7 +391,6 @@ scrollbar slider:hover {
 /* ---------- Search Bar ---------- */
 searchbar {
   background: rgba(0, 0, 0, 0);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 searchentry {
@@ -560,8 +556,6 @@ gridview.drag-over, columnview.drag-over {
 .aether-tab-bar tab {
   background: rgba(255, 255, 255, 0.04);
   border-radius: 8px 8px 0 0;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-bottom: none;
   color: rgba(180, 200, 240, 0.70);
   min-width: 80px;
   padding: 4px 12px;
