@@ -24,6 +24,13 @@ window.aether-window {
   background: transparent;
 }
 
+paned > separator {
+  background: transparent;
+  opacity: 0;
+  min-width: 0px;
+  border: none;
+}
+
 /* Sidebar header */
 .aether-sidebar headerbar {
   background: rgba(0, 0, 0, 0);
