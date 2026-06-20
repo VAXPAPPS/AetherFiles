@@ -163,7 +163,7 @@ static void draw_sidebar_toggle(GtkDrawingArea *area, cairo_t *cr, int width, in
     AetherWindow *self = AETHER_WINDOW(user_data);
     gboolean active = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(self->btn_toggle_sidebar));
     
-    double x = 3.5, y = 3.5, w = width - 7, h = height - 7, r = 1.5;
+    double x = 1.5, y = 1.5, w = width - 3, h = height - 3, r = 1.5;
     cairo_set_line_width(cr, 1.2);
     
     GdkRGBA color;
@@ -354,7 +354,7 @@ static void aether_window_init(AetherWindow *self) {
     gtk_widget_add_css_class(self->btn_toggle_sidebar, "nav-btn");
     
     GtkWidget *sidebar_icon = gtk_drawing_area_new();
-    gtk_widget_set_size_request(sidebar_icon, 20, 20);
+    gtk_widget_set_size_request(sidebar_icon, 14, 14);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(sidebar_icon), draw_sidebar_toggle, self, NULL);
     gtk_button_set_child(GTK_BUTTON(self->btn_toggle_sidebar), sidebar_icon);
     

@@ -469,12 +469,16 @@ button.flat:hover {
 .nav-btn {
   background: rgba(255, 255, 255, 0.07);
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 8px;
+  border-radius: 6px;
   color: rgba(180, 205, 255, 0.75);
-  min-width: 32px;
-  min-height: 32px;
-  padding: 4px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 2px;
   transition: background 130ms ease;
+}
+
+.nav-btn image {
+  -gtk-icon-size: 12px;
 }
 
 .nav-btn:hover {
@@ -493,11 +497,15 @@ button.flat:hover {
   background: rgba(255, 255, 255, 0.07);
   border: 1px solid rgba(255, 255, 255, 0.09);
   color: rgba(180, 205, 255, 0.70);
-  border-radius: 8px;
-  min-width: 32px;
-  min-height: 32px;
-  padding: 4px;
+  border-radius: 6px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 2px;
   transition: all 130ms ease;
+}
+
+.view-switcher-btn image {
+  -gtk-icon-size: 12px;
 }
 
 .view-switcher-btn:hover {
