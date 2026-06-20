@@ -160,7 +160,6 @@ headerbar.aether-header {
 /* ---------- Action Toolbar (below header) ---------- */
 .aether-toolbar {
   background: rgb(255, 255, 255);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   padding: 6px 14px;
   min-height: 44px;
 }
@@ -382,7 +381,6 @@ scrollbar slider:hover {
 /* ---------- Status Bar ---------- */
 .aether-statusbar {
   background: rgba(0, 0, 0, 0);
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
   min-height: 26px;
   padding: 0 16px;
 }
@@ -426,7 +424,6 @@ dialog {
 
 dialog headerbar {
   background: rgba(0, 0, 0, 0.301);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 16px 16px 0 0;
 }
 
@@ -553,7 +550,6 @@ gridview.drag-over, columnview.drag-over {
 /* ---------- Tab Bar ---------- */
 .aether-tab-bar {
   background: rgba(8, 12, 28, 0.65);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   padding: 4px 6px 0;
 }
 
