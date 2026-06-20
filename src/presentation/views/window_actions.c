@@ -522,8 +522,33 @@ static void dnd_conflict_data_free(DnDConflictData *d) {
     g_free(d);
 }
 
+/* بيانات مساعدة لإعادة تحميل النافذة بعد انتهاء نقل DnD عبر الـ daemon */
+typedef struct {
+    AetherWindow *win;
+    int           pending;
+} DnDPrivCtx;
+
+static void on_dnd_priv_done(GObject *src, GAsyncResult *res, gpointer ud) {
+    (void)src;
+    DnDPrivCtx *ctx = ud;
+    GError *err = NULL;
+    if (!aether_privileged_op_finish(res, &err)) {
+        g_printerr("DnD privileged move failed: %s\n", err ? err->message : "?");
+        if (err) g_error_free(err);
+    }
+    ctx->pending--;
+    if (ctx->pending <= 0) {
+        aether_window_reload(ctx->win);
+        g_free(ctx);
+    }
+}
+
 static void execute_dnd_move(AetherWindow *win, const char *dest_dir, GPtrArray *src_paths, GFileCopyFlags flags) {
     GFile *dest_gdir = g_file_new_for_path(dest_dir);
+
+    /* نتتبع الملفات التي تحتاج privileged */
+    GPtrArray *priv_srcs  = g_ptr_array_new_with_free_func(g_free);
+    GPtrArray *priv_dests = g_ptr_array_new_with_free_func(g_free);
 
     for (guint i = 0; i < src_paths->len; i++) {
         const char *src_path = g_ptr_array_index(src_paths, i);
@@ -532,25 +557,56 @@ static void execute_dnd_move(AetherWindow *win, const char *dest_dir, GPtrArray 
         GFile *src = g_file_new_for_path(src_path);
         char *basename = g_file_get_basename(src);
         GFile *dest_file = g_file_get_child(dest_gdir, basename);
+        char *dest_path  = g_file_get_path(dest_file);
         GError *err = NULL;
 
         g_file_move(src, dest_file, flags, NULL, NULL, NULL, &err);
         if (err) {
-            g_printerr("DnD move error: %s\n", err->message);
+            if (err->code == G_IO_ERROR_PERMISSION_DENIED &&
+                aether_privileged_is_available()) {
+                /* أضف للقائمة المحمية */
+                g_ptr_array_add(priv_srcs,  g_strdup(src_path));
+                g_ptr_array_add(priv_dests, g_strdup(dest_path));
+            } else {
+                g_printerr("DnD move error: %s\n", err->message);
+            }
             g_error_free(err);
         }
 
+        g_free(dest_path);
         g_object_unref(dest_file);
         g_free(basename);
         g_object_unref(src);
     }
     g_object_unref(dest_gdir);
 
-    aether_window_reload(win);
+    if (priv_srcs->len > 0) {
+        /* شغّل الـ daemon إذا لم يكن يعمل */
+        if (!aether_privileged_daemon_is_running())
+            aether_privileged_daemon_start();
+
+        DnDPrivCtx *ctx = g_new0(DnDPrivCtx, 1);
+        ctx->win     = win;
+        ctx->pending = (int)priv_srcs->len;
+        for (guint i = 0; i < priv_srcs->len; i++) {
+            aether_privileged_move_async(
+                g_ptr_array_index(priv_srcs, i),
+                g_ptr_array_index(priv_dests, i),
+                on_dnd_priv_done, ctx);
+        }
+    } else {
+        aether_window_reload(win);
+    }
+
+    g_ptr_array_free(priv_srcs,  TRUE);
+    g_ptr_array_free(priv_dests, TRUE);
 }
 
 static void execute_dnd_move_keep_both(AetherWindow *win, const char *dest_dir, GPtrArray *src_paths) {
     GFile *dest_gdir = g_file_new_for_path(dest_dir);
+
+    GPtrArray *priv_srcs  = g_ptr_array_new_with_free_func(g_free);
+    GPtrArray *priv_dests = g_ptr_array_new_with_free_func(g_free);
 
     for (guint i = 0; i < src_paths->len; i++) {
         const char *src_path = g_ptr_array_index(src_paths, i);
@@ -598,7 +654,13 @@ static void execute_dnd_move_keep_both(AetherWindow *win, const char *dest_dir, 
         GError *err = NULL;
         g_file_move(src, dest_file, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
         if (err) {
-            g_printerr("DnD keep-both error: %s\n", err->message);
+            if (err->code == G_IO_ERROR_PERMISSION_DENIED &&
+                aether_privileged_is_available()) {
+                g_ptr_array_add(priv_srcs,  g_strdup(src_path));
+                g_ptr_array_add(priv_dests, g_strdup(dest_file_path));
+            } else {
+                g_printerr("DnD keep-both error: %s\n", err->message);
+            }
             g_error_free(err);
         }
 
@@ -609,7 +671,25 @@ static void execute_dnd_move_keep_both(AetherWindow *win, const char *dest_dir, 
     }
     g_object_unref(dest_gdir);
 
-    aether_window_reload(win);
+    if (priv_srcs->len > 0) {
+        if (!aether_privileged_daemon_is_running())
+            aether_privileged_daemon_start();
+
+        DnDPrivCtx *ctx = g_new0(DnDPrivCtx, 1);
+        ctx->win     = win;
+        ctx->pending = (int)priv_srcs->len;
+        for (guint i = 0; i < priv_srcs->len; i++) {
+            aether_privileged_move_async(
+                g_ptr_array_index(priv_srcs, i),
+                g_ptr_array_index(priv_dests, i),
+                on_dnd_priv_done, ctx);
+        }
+    } else {
+        aether_window_reload(win);
+    }
+
+    g_ptr_array_free(priv_srcs,  TRUE);
+    g_ptr_array_free(priv_dests, TRUE);
 }
 
 static void on_dnd_conflict_response(GtkDialog *dlg, int response, gpointer user_data) {

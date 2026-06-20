@@ -67,14 +67,33 @@ typedef struct {
 
 static DaemonState s_daemon = {0};
 
-/* قراءة سطر كامل بشكل متزامن من stream (للإعداد الأولي فقط) */
+typedef struct {
+    char ch;
+    gboolean done;
+    gboolean error;
+} ReadCharCtx;
+
+static void on_read_char(GObject *src, GAsyncResult *res, gpointer ud) {
+    ReadCharCtx *ctx = ud;
+    gssize nr = g_input_stream_read_finish(G_INPUT_STREAM(src), res, NULL);
+    ctx->done = TRUE;
+    if (nr <= 0) ctx->error = TRUE;
+}
+
+/* قراءة سطر كامل بشكل متزامن من stream مع السماح للواجهة بالاستجابة */
 static char *read_line_sync(GInputStream *stream) {
     GString *gs = g_string_new(NULL);
-    char ch;
-    gsize nr;
-    while (g_input_stream_read(stream, &ch, 1, NULL, NULL) == 1) {
-        if (ch == '\n') break;
-        if (ch != '\r') g_string_append_c(gs, ch);
+    ReadCharCtx ctx;
+    while (TRUE) {
+        ctx.done = FALSE;
+        ctx.error = FALSE;
+        g_input_stream_read_async(stream, &ctx.ch, 1, G_PRIORITY_DEFAULT, NULL, on_read_char, &ctx);
+        while (!ctx.done) {
+            g_main_context_iteration(NULL, TRUE);
+        }
+        if (ctx.error) break;
+        if (ctx.ch == '\n') break;
+        if (ctx.ch != '\r') g_string_append_c(gs, ctx.ch);
     }
     return g_string_free(gs, FALSE);
 }
@@ -332,11 +351,15 @@ static void on_daemon_read(GObject *src, GAsyncResult *res, gpointer ud) {
 
 /* إرسال أمر وبدء قراءة الرد */
 static void daemon_dispatch(GTask *task, HelperMode mode, const char *cmd) {
+    /* إذا لم يكن الـ daemon يعمل، حاول تشغيله تلقائياً عبر pkexec */
     if (!s_daemon.ready) {
-        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_NOT_CONNECTED,
-                                "Privileged daemon not running");
-        g_object_unref(task);
-        return;
+        if (!daemon_start()) {
+            /* المستخدم رفض كلمة المرور أو فشل pkexec */
+            g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                                    "Authentication failed or was cancelled");
+            g_object_unref(task);
+            return;
+        }
     }
 
     if (!daemon_send(cmd)) {

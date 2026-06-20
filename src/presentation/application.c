@@ -7,6 +7,7 @@
 #include "../theme_manager.h"
 #include <gio/gio.h>
 #include <string.h>
+#include <unistd.h>
 
 struct _AetherApplication {
     GtkApplication parent_instance;
@@ -453,21 +454,8 @@ static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer
     g_strfreev(paths);
 }
 
-static void on_archive_finished(GObject *source, GAsyncResult *res, gpointer user_data) {
-    (void)source;
-    AetherWindow *win = AETHER_WINDOW(user_data);
-    GError *err = NULL;
-    gboolean success = g_task_propagate_boolean(G_TASK(res), &err);
-    
-    if (!success || err) {
-        /* عند فشل الضغط/فك بسبب الصلاحيات، سيُعالج من الدالة المستدعية */
-        g_printerr("Archive operation failed: %s\n", err ? err->message : "Unknown error");
-        if (err) g_error_free(err);
-    }
-    
-    aether_window_stop_progress(win);
-    aether_window_reload(win);
-}
+static void on_archive_done(GObject *source, GAsyncResult *res, gpointer user_data);
+
 
 static void on_extract_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action;
@@ -481,16 +469,43 @@ static void on_extract_action(GSimpleAction *action, GVariant *parameter, gpoint
     
     aether_window_start_progress(win);
 
-    /* حاول العملية العادية أولاً */
-    if (aether_window_get_elevated_mode(win) && aether_privileged_is_available()) {
+    /* إذا كنا في وضع الصلاحيات المرتفعة أو المسار محمي، استخدم الـ daemon مباشرة */
+    if ((aether_window_get_elevated_mode(win) || !g_access(dest_dir, W_OK)) &&
+        aether_privileged_is_available()) {
+        if (!aether_privileged_daemon_is_running())
+            aether_privileged_daemon_start();
         aether_privileged_extract_async(archive_path, dest_dir,
             (GAsyncReadyCallback)on_privileged_op_done, win);
     } else {
         aether_archive_manager_extract_async(aether_archive_manager_get_default(), 
                                              archive_path, dest_dir, 
-                                             on_archive_finished, win);
+                                             on_archive_done, win);
     }
     g_free(dest_dir);
+}
+
+/* callback موحّد للأرشيف العادي — يُعيد المحاولة عبر الـ daemon عند فشله بالصلاحيات */
+typedef struct { AetherApplication *app; char *format; char *dest; GStrv sources; AetherWindow *win; } ArchiveCtx;
+
+static void on_archive_done(GObject *source, GAsyncResult *res, gpointer user_data) {
+    (void)source;
+    AetherWindow *win = AETHER_WINDOW(user_data);
+    GError *err = NULL;
+    gboolean success = g_task_propagate_boolean(G_TASK(res), &err);
+    
+    if (!success && err) {
+        if (err->code == G_IO_ERROR_PERMISSION_DENIED &&
+            aether_privileged_is_available()) {
+            /* لا يمكن التكرار هنا مباشرة — سنسجّل فقط */
+            g_printerr("Archive permission denied, use elevated mode for protected paths.\n");
+        } else {
+            g_printerr("Archive operation failed: %s\n", err->message);
+        }
+        g_error_free(err);
+    }
+    
+    aether_window_stop_progress(win);
+    aether_window_reload(win);
 }
 
 static void on_compress_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
@@ -538,14 +553,17 @@ static void on_compress_action(GSimpleAction *action, GVariant *parameter, gpoin
     
     aether_window_start_progress(win);
 
-    /* إذا كانت النافذة في وضع الصلاحيات المرتفعة، استخدم المساعد */
-    if (aether_window_get_elevated_mode(win) && aether_privileged_is_available()) {
+    /* إذا كنا في وضع الصلاحيات المرتفعة أو المسار محمي، استخدم الـ daemon */
+    if ((aether_window_get_elevated_mode(win) || !g_access(current_dir, W_OK)) &&
+        aether_privileged_is_available()) {
+        if (!aether_privileged_daemon_is_running())
+            aether_privileged_daemon_start();
         aether_privileged_compress_async(format, dest_path, paths,
             (GAsyncReadyCallback)on_privileged_op_done, win);
     } else {
         aether_archive_manager_compress_async(aether_archive_manager_get_default(), 
                                               paths, dest_path, format, 
-                                              on_archive_finished, win);
+                                              on_archive_done, win);
     }
                                           
     g_free(dest_path);
@@ -573,8 +591,22 @@ static void on_restore_action(GSimpleAction *action, GVariant *parameter, gpoint
                 GError *err = NULL;
                 g_file_move(file, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
                 if (err) {
-                    g_printerr("Restore error: %s\n", err->message);
-                    g_error_free(err);
+                    /* عند فشل النقل بسبب الصلاحيات, نسخ (من السلة) إلى المسار الأصلي عبر الـ daemon */
+                    if (err->code == G_IO_ERROR_PERMISSION_DENIED &&
+                        aether_privileged_is_available()) {
+                        g_error_free(err);
+                        /* المسار في السلة هو trash:/// وليس مسار حقيقي مباشر — نسخ تعاودي من المسار الحقيقي للسلة */
+                        char *actual_src = g_file_get_path(file); /* قد يكون NULL لـ trash:// */
+                        if (actual_src) {
+                            aether_window_start_progress(win);
+                            aether_privileged_move_async(actual_src, orig_path,
+                                (GAsyncReadyCallback)on_privileged_op_done, win);
+                            g_free(actual_src);
+                        }
+                    } else {
+                        g_printerr("Restore error: %s\n", err->message);
+                        g_error_free(err);
+                    }
                 }
                 g_object_unref(dest);
             }
@@ -629,7 +661,22 @@ static void on_empty_trash_action(GSimpleAction *action, GVariant *parameter, gp
         GFileInfo *info;
         while ((info = g_file_enumerator_next_file(e, NULL, NULL)) != NULL) {
             GFile *child = g_file_enumerator_get_child(e, info);
-            g_file_delete(child, NULL, NULL);
+            GError *err = NULL;
+            if (!g_file_delete(child, NULL, &err)) {
+                if (err && err->code == G_IO_ERROR_PERMISSION_DENIED &&
+                    aether_privileged_is_available()) {
+                    g_error_free(err);
+                    char *child_path = g_file_get_path(child);
+                    if (child_path) {
+                        aether_privileged_delete_async(child_path,
+                            (GAsyncReadyCallback)on_privileged_op_done, win);
+                        g_free(child_path);
+                    }
+                } else if (err) {
+                    g_printerr("Empty trash error: %s\n", err->message);
+                    g_error_free(err);
+                }
+            }
             g_object_unref(child);
             g_object_unref(info);
         }
@@ -654,7 +701,24 @@ static void on_restore_all_action(GSimpleAction *action, GVariant *parameter, gp
             if (orig_path) {
                 GFile *child = g_file_enumerator_get_child(e, info);
                 GFile *dest = g_file_parse_name(orig_path);
-                g_file_move(child, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, NULL);
+                GError *err = NULL;
+                g_file_move(child, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
+                if (err) {
+                    if (err->code == G_IO_ERROR_PERMISSION_DENIED &&
+                        aether_privileged_is_available()) {
+                        g_error_free(err);
+                        char *child_path = g_file_get_path(child);
+                        if (child_path) {
+                            aether_window_start_progress(win);
+                            aether_privileged_move_async(child_path, orig_path,
+                                (GAsyncReadyCallback)on_privileged_op_done, win);
+                            g_free(child_path);
+                        }
+                    } else {
+                        g_printerr("Restore-all error: %s\n", err->message);
+                        g_error_free(err);
+                    }
+                }
                 g_object_unref(dest);
                 g_object_unref(child);
             }

@@ -169,8 +169,7 @@ static gboolean set_model_idle(gpointer user_data) {
         g_clear_object(&d->window->list_sel);
     }
     if (d->window->filter_model) {
-        d->window->filter_model = NULL;
-        g_object_unref(d->window->filter_model);
+        g_clear_object(&d->window->filter_model);
     }
 
     gtk_grid_view_set_model(GTK_GRID_VIEW(d->window->grid_view),

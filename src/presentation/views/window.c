@@ -541,8 +541,17 @@ const char *aether_window_get_current_path(AetherWindow *self) {
 
 void aether_window_reload(AetherWindow *self) {
     if (!self->current_path) return;
-    aether_file_repository_list_directory_async(
-        self->repo, self->current_path, NULL, on_directory_loaded, self);
+    /* إذا كنا في مجلد محمي والـ daemon يعمل، استخدم القائمة المحمية */
+    if (self->elevated_mode && aether_privileged_daemon_is_running()) {
+        if (self->progress_spinner)
+            gtk_spinner_start(GTK_SPINNER(self->progress_spinner));
+        aether_privileged_list_async(self->current_path, NULL,
+                                     (GAsyncReadyCallback)on_elevated_list_done,
+                                     self);
+    } else {
+        aether_file_repository_list_directory_async(
+            self->repo, self->current_path, NULL, on_directory_loaded, self);
+    }
 }
 
 
