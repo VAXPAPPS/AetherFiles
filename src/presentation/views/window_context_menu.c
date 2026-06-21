@@ -1,6 +1,17 @@
 #include "window_private.h"
 #include <glib/gi18n.h>
 
+static GVariant* safe_variant_string(const char *str) {
+    if (!str) return g_variant_new_string("");
+    if (g_utf8_validate(str, -1, NULL)) return g_variant_new_string(str);
+    char *utf8 = g_filename_to_utf8(str, -1, NULL, NULL, NULL);
+    if (utf8) {
+        GVariant *v = g_variant_new_take_string(utf8);
+        return v;
+    }
+    return g_variant_new_string("");
+}
+
 static gboolean idle_unparent(gpointer data) {
     gtk_widget_unparent(GTK_WIDGET(data));
     return G_SOURCE_REMOVE;
@@ -96,14 +107,14 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
         
         GMenu *s2 = g_menu_new();
         mi = g_menu_item_new("Properties", NULL);
-        g_menu_item_set_action_and_target_value(mi, "app.properties", g_variant_new_string(path ? path : ""));
+        g_menu_item_set_action_and_target_value(mi, "app.properties", safe_variant_string(path ? path : ""));
         g_menu_append_item(s2, mi); g_object_unref(mi);
         g_menu_append_section(menu, NULL, G_MENU_MODEL(s2)); g_object_unref(s2);
     } else {
         /* Open */
         GMenu *s1 = g_menu_new();
         GMenuItem *mi = g_menu_item_new("Open", NULL);
-        g_menu_item_set_action_and_target_value(mi, "app.open", g_variant_new_string(path ? path : ""));
+        g_menu_item_set_action_and_target_value(mi, "app.open", safe_variant_string(path ? path : ""));
         g_menu_append_item(s1, mi); g_object_unref(mi);
         g_menu_append_section(menu, NULL, G_MENU_MODEL(s1)); g_object_unref(s1);
 
@@ -127,18 +138,18 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
         g_menu_append_item(s3, mi); g_object_unref(mi);
 
         mi = g_menu_item_new("Rename…", NULL);
-        g_menu_item_set_action_and_target_value(mi, "app.rename-path", g_variant_new_string(path ? path : ""));
+        g_menu_item_set_action_and_target_value(mi, "app.rename-path", safe_variant_string(path ? path : ""));
         g_menu_append_item(s3, mi); g_object_unref(mi);
 
         if (is_media_file(aether_file_entity_get_name(entity))) {
             mi = g_menu_item_new("Set as Background…", NULL);
-            g_menu_item_set_action_and_target_value(mi, "app.set_background", g_variant_new_string(path ? path : ""));
+            g_menu_item_set_action_and_target_value(mi, "app.set_background", safe_variant_string(path ? path : ""));
             g_menu_append_item(s3, mi); g_object_unref(mi);
         }
 
         if (is_archive_file(aether_file_entity_get_name(entity))) {
             mi = g_menu_item_new("Extract Here", NULL);
-            g_menu_item_set_action_and_target_value(mi, "app.extract", g_variant_new_string(path ? path : ""));
+            g_menu_item_set_action_and_target_value(mi, "app.extract", safe_variant_string(path ? path : ""));
             g_menu_append_item(s3, mi); g_object_unref(mi);
         }
         
@@ -170,15 +181,15 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
         if (aether_file_entity_is_directory(entity)) {
             if (is_bookmarked(path)) {
                 mi = g_menu_item_new("Remove from Bookmarks", NULL);
-                g_menu_item_set_action_and_target_value(mi, "win.remove-bookmark-path", g_variant_new_string(path ? path : ""));
+                g_menu_item_set_action_and_target_value(mi, "win.remove-bookmark-path", safe_variant_string(path ? path : ""));
             } else {
                 mi = g_menu_item_new("Add to Bookmarks", NULL);
-                g_menu_item_set_action_and_target_value(mi, "win.add-bookmark-path", g_variant_new_string(path ? path : ""));
+                g_menu_item_set_action_and_target_value(mi, "win.add-bookmark-path", safe_variant_string(path ? path : ""));
             }
             g_menu_append_item(s4, mi); g_object_unref(mi);
         }
         mi = g_menu_item_new("Properties", NULL);
-        g_menu_item_set_action_and_target_value(mi, "app.properties", g_variant_new_string(path ? path : ""));
+        g_menu_item_set_action_and_target_value(mi, "app.properties", safe_variant_string(path ? path : ""));
         g_menu_append_item(s4, mi); g_object_unref(mi);
         g_menu_append_section(menu, NULL, G_MENU_MODEL(s4)); g_object_unref(s4);
     }
@@ -221,14 +232,36 @@ void on_background_right_clicked(GtkGestureClick *gesture, int n_press,
         g_menu_item_set_action_and_target_value(mi, "app.empty-trash", NULL);
         g_menu_append_item(menu, mi); g_object_unref(mi);
     } else {
+        GMenuItem *mi;
+
+        /* Create Document */
+        mi = g_menu_item_new("Create Document", NULL);
+        g_menu_item_set_action_and_target_value(mi, "win.create-document", NULL);
+        g_menu_append_item(menu, mi); g_object_unref(mi);
+
+        /* Create Folder */
+        mi = g_menu_item_new("Create Folder", NULL);
+        g_menu_item_set_action_and_target_value(mi, "win.create-folder", NULL);
+        g_menu_append_item(menu, mi); g_object_unref(mi);
+
+        /* Select All */
+        mi = g_menu_item_new("Select All", NULL);
+        g_menu_item_set_action_and_target_value(mi, "win.select-all", NULL);
+        g_menu_append_item(menu, mi); g_object_unref(mi);
+
+        /* Open Terminal */
+        mi = g_menu_item_new("Open Terminal", NULL);
+        g_menu_item_set_action_and_target_value(mi, "win.open-terminal", NULL);
+        g_menu_append_item(menu, mi); g_object_unref(mi);
+
         /* Paste */
-        GMenuItem *mi = g_menu_item_new("Paste", NULL);
+        mi = g_menu_item_new("Paste", NULL);
         g_menu_item_set_action_and_target_value(mi, "app.paste", NULL);
         g_menu_append_item(menu, mi); g_object_unref(mi);
 
         /* Properties */
         mi = g_menu_item_new("Properties", NULL);
-        g_menu_item_set_action_and_target_value(mi, "app.properties", g_variant_new_string(current_path));
+        g_menu_item_set_action_and_target_value(mi, "app.properties", safe_variant_string(current_path));
         g_menu_append_item(menu, mi); g_object_unref(mi);
     }
 

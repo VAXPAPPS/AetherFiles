@@ -398,13 +398,19 @@ scrollbar slider:hover {
 }
 
 /* ---------- Search Bar ---------- */
-searchbar {
-  background: rgba(0, 0, 0, 0);
+searchbar, 
+searchbar > revealer > box {
+  background: transparent;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
 }
 
-searchentry {
-  background: rgba(0, 0, 0, 0);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+searchentry,
+searchentry > text {
+  background: transparent;
+  background-color: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.632);
   border-radius: 10px;
   color: rgba(220, 235, 255, 0.90);
   padding: 6px 12px;
@@ -430,6 +436,36 @@ dialog {
 dialog headerbar {
   background: rgba(0, 0, 0, 0.301);
   border-radius: 16px 16px 0 0;
+}
+
+dialog listbox, .transparent-list {
+  background: transparent;
+}
+
+.transparent-scrolled,
+.transparent-scrolled viewport {
+  background: transparent;
+}
+
+dialog listbox row {
+  background: transparent;
+  color: rgba(220, 235, 255, 0.90);
+  border-radius: 8px;
+  margin: 2px 4px;
+  transition: background 150ms ease;
+}
+
+dialog listbox row:hover {
+  background: rgba(94, 196, 255, 0.15);
+}
+
+dialog listbox row:selected {
+  background: rgba(94, 196, 255, 0.25);
+  color: #5EC4FF;
+}
+
+dialog label {
+  color: rgba(220, 235, 255, 0.90);
 }
 
 /* ---------- Buttons (general) ---------- */

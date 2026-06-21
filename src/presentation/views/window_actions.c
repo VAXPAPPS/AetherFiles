@@ -15,6 +15,43 @@ static void on_privileged_action_done(GObject *src, GAsyncResult *res, gpointer 
     load_directory(w, w->current_path);
 }
 
+static char *generate_unique_filename(const char *dir, const char *base_name) {
+    char *full = g_build_filename(dir, base_name, NULL);
+    if (!g_file_test(full, G_FILE_TEST_EXISTS)) {
+        return g_strdup(base_name);
+    }
+    g_free(full);
+    
+    char *dot = strrchr(base_name, '.');
+    char *name = NULL;
+    char *ext = NULL;
+    if (dot && dot != base_name) {
+        name = g_strndup(base_name, dot - base_name);
+        ext = g_strdup(dot);
+    } else {
+        name = g_strdup(base_name);
+        ext = g_strdup("");
+    }
+    
+    int i = 1;
+    char *new_base = NULL;
+    while (1) {
+        new_base = g_strdup_printf("%s (%d)%s", name, i, ext);
+        full = g_build_filename(dir, new_base, NULL);
+        if (!g_file_test(full, G_FILE_TEST_EXISTS)) {
+            g_free(full);
+            break;
+        }
+        g_free(full);
+        g_free(new_base);
+        i++;
+    }
+    
+    g_free(name);
+    g_free(ext);
+    return new_base;
+}
+
 void on_new_folder_clicked(GtkButton *btn, gpointer user_data) {
     (void)btn;
     AetherWindow *self = AETHER_WINDOW(user_data);
@@ -31,7 +68,9 @@ void on_new_folder_clicked(GtkButton *btn, gpointer user_data) {
 
     GtkWidget *entry = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Folder name");
-    gtk_editable_set_text(GTK_EDITABLE(entry), "New Folder");
+    char *unique_name = generate_unique_filename(self->current_path, "New Folder");
+    gtk_editable_set_text(GTK_EDITABLE(entry), unique_name);
+    g_free(unique_name);
     gtk_editable_select_region(GTK_EDITABLE(entry), 0, -1);
     
     GtkWidget *area = gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialog));
@@ -75,7 +114,8 @@ void on_new_folder_response(GtkDialog *d, int response_id, gpointer ud) {
             if (err) g_error_free(err);
         }
     } else {
-        load_directory(w, w->current_path);
+        aether_file_repository_list_directory_async(
+            w->repo, w->current_path, NULL, on_directory_loaded, w);
     }
     g_free(full);
     g_object_unref(dir);
@@ -91,36 +131,200 @@ void on_btn_toggle_sidebar_toggled(GtkToggleButton *btn, gpointer user_data) {
     }
 }
 
+typedef struct {
+    AetherWindow *win;
+    char *template_path;
+} NewDocCtx;
+
+static void on_new_doc_name_response(GtkDialog *d, int response_id, gpointer ud) {
+    NewDocCtx *ctx = ud;
+    if (response_id != GTK_RESPONSE_ACCEPT) {
+        g_free(ctx->template_path);
+        g_free(ctx);
+        gtk_window_destroy(GTK_WINDOW(d));
+        return;
+    }
+    
+    GtkWidget *ent = GTK_WIDGET(g_object_get_data(G_OBJECT(d), "entry"));
+    const char *nm = gtk_editable_get_text(GTK_EDITABLE(ent));
+    if (!nm || nm[0] == '\0') {
+        g_free(ctx->template_path);
+        g_free(ctx);
+        gtk_window_destroy(GTK_WINDOW(d));
+        return;
+    }
+    
+    char *full = g_build_filename(ctx->win->current_path, nm, NULL);
+    GError *err = NULL;
+    
+    if (ctx->template_path) {
+        GFile *src = g_file_new_for_path(ctx->template_path);
+        GFile *dest = g_file_new_for_path(full);
+        if (!g_file_copy(src, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &err)) {
+            if (err->code == G_IO_ERROR_PERMISSION_DENIED && aether_privileged_is_available()) {
+                g_error_free(err);
+                aether_privileged_copy_async(ctx->template_path, full, (GAsyncReadyCallback)on_privileged_action_done, ctx->win);
+            } else {
+                g_printerr("template copy error: %s\n", err->message);
+                g_error_free(err);
+            }
+        } else {
+            aether_file_repository_list_directory_async(
+                ctx->win->repo, ctx->win->current_path, NULL, on_directory_loaded, ctx->win);
+        }
+        g_object_unref(src);
+        g_object_unref(dest);
+    } else {
+        GFile *file = g_file_new_for_path(full);
+        GFileOutputStream *stream = g_file_create(file, G_FILE_CREATE_NONE, NULL, &err);
+        if (stream) {
+            g_object_unref(stream);
+            aether_file_repository_list_directory_async(
+                ctx->win->repo, ctx->win->current_path, NULL, on_directory_loaded, ctx->win);
+        } else if (err) {
+            if (err->code == G_IO_ERROR_PERMISSION_DENIED && aether_privileged_is_available()) {
+                g_error_free(err);
+                aether_privileged_touch_async(full, (GAsyncReadyCallback)on_privileged_action_done, ctx->win);
+            } else {
+                g_printerr("touch error: %s\n", err->message);
+                g_error_free(err);
+            }
+        }
+        g_object_unref(file);
+    }
+    
+    g_free(full);
+    g_free(ctx->template_path);
+    g_free(ctx);
+    gtk_window_destroy(GTK_WINDOW(d));
+}
+
+static void on_template_selected(GtkListBox *box, GtkListBoxRow *row, gpointer ud) {
+    (void)box;
+    GtkDialog *tmpl_dlg = GTK_DIALOG(ud);
+    AetherWindow *win = AETHER_WINDOW(g_object_get_data(G_OBJECT(tmpl_dlg), "window"));
+    const char *tmpl_path = g_object_get_data(G_OBJECT(row), "tmpl-path");
+    
+    gtk_window_destroy(GTK_WINDOW(tmpl_dlg));
+    
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(win),
+                                               GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                               GTK_MESSAGE_OTHER,
+                                               GTK_BUTTONS_NONE,
+                                               "Enter a name for the new document:");
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_CANCEL);
+    gtk_dialog_add_button(GTK_DIALOG(dialog), "Create", GTK_RESPONSE_ACCEPT);
+    gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_ACCEPT);
+
+    GtkWidget *entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Document name");
+    
+    if (tmpl_path) {
+        char *bn = g_path_get_basename(tmpl_path);
+        char *unique_bn = generate_unique_filename(win->current_path, bn);
+        gtk_editable_set_text(GTK_EDITABLE(entry), unique_bn);
+        g_free(unique_bn);
+        g_free(bn);
+    } else {
+        char *unique_bn = generate_unique_filename(win->current_path, "New Document.txt");
+        gtk_editable_set_text(GTK_EDITABLE(entry), unique_bn);
+        g_free(unique_bn);
+    }
+    
+    gtk_editable_select_region(GTK_EDITABLE(entry), 0, -1);
+    
+    GtkWidget *area = gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialog));
+    gtk_box_append(GTK_BOX(area), entry);
+    g_object_set_data(G_OBJECT(dialog), "entry", entry);
+
+    NewDocCtx *ctx = g_new0(NewDocCtx, 1);
+    ctx->win = win;
+    ctx->template_path = g_strdup(tmpl_path);
+    
+    g_signal_connect(dialog, "response", G_CALLBACK(on_new_doc_name_response), ctx);
+    gtk_window_present(GTK_WINDOW(dialog));
+}
+
 void on_new_document_clicked(GtkButton *btn, gpointer user_data) {
+    (void)btn;
     AetherWindow *self = AETHER_WINDOW(user_data);
     if (!self->current_path) return;
-    char  *full = g_build_filename(self->current_path, "New Document.txt", NULL);
-    GFile *file = g_file_new_for_path(full);
-    GError *err = NULL;
-    GFileOutputStream *stream = g_file_create(file, G_FILE_CREATE_NONE, NULL, &err);
-    if (stream) {
-        g_object_unref(stream);
-        load_directory(self, self->current_path);
-    } else if (err) {
-        if (err->code == G_IO_ERROR_PERMISSION_DENIED &&
-            aether_privileged_is_available()) {
-            g_error_free(err);
-            aether_privileged_touch_async(full,
-                (GAsyncReadyCallback)on_privileged_action_done, self);
-        } else {
-            g_printerr("touch error: %s\n", err->message);
-            g_error_free(err);
+    
+    const char *templates_dir = g_get_user_special_dir(G_USER_DIRECTORY_TEMPLATES);
+    char *fallback_dir = NULL;
+    if (!templates_dir) {
+        fallback_dir = g_build_filename(g_get_home_dir(), "Templates", NULL);
+        templates_dir = fallback_dir;
+    }
+    
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(self),
+                                               GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                               GTK_MESSAGE_OTHER,
+                                               GTK_BUTTONS_CANCEL,
+                                               "Choose a Template");
+    g_object_set_data(G_OBJECT(dialog), "window", self);
+    
+    GtkWidget *list_box = gtk_list_box_new();
+    gtk_widget_add_css_class(list_box, "transparent-list");
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box), GTK_SELECTION_SINGLE);
+    
+    GtkWidget *row = gtk_list_box_row_new();
+    GtkWidget *lbl = gtk_label_new("Empty Document");
+    gtk_widget_set_margin_top(lbl, 8);
+    gtk_widget_set_margin_bottom(lbl, 8);
+    gtk_widget_set_margin_start(lbl, 12);
+    gtk_widget_set_margin_end(lbl, 12);
+    gtk_label_set_xalign(GTK_LABEL(lbl), 0.0f);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), lbl);
+    g_object_set_data(G_OBJECT(row), "tmpl-path", NULL);
+    gtk_list_box_append(GTK_LIST_BOX(list_box), row);
+    
+    if (templates_dir) {
+        GDir *dir = g_dir_open(templates_dir, 0, NULL);
+        if (dir) {
+            const char *name;
+            while ((name = g_dir_read_name(dir)) != NULL) {
+                if (name[0] == '.') continue; // Skip hidden files
+                char *path = g_build_filename(templates_dir, name, NULL);
+                if (g_file_test(path, G_FILE_TEST_IS_REGULAR)) {
+                    GtkWidget *r = gtk_list_box_row_new();
+                    GtkWidget *l = gtk_label_new(name);
+                    gtk_widget_set_margin_top(l, 8);
+                    gtk_widget_set_margin_bottom(l, 8);
+                    gtk_widget_set_margin_start(l, 12);
+                    gtk_widget_set_margin_end(l, 12);
+                    gtk_label_set_xalign(GTK_LABEL(l), 0.0f);
+                    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(r), l);
+                    g_object_set_data_full(G_OBJECT(r), "tmpl-path", g_strdup(path), g_free);
+                    gtk_list_box_append(GTK_LIST_BOX(list_box), r);
+                }
+                g_free(path);
+            }
+            g_dir_close(dir);
         }
     }
-    g_free(full);
-    g_object_unref(file);
+    
+    g_free(fallback_dir);
+    
+    g_signal_connect(list_box, "row-activated", G_CALLBACK(on_template_selected), dialog);
+    
+    GtkWidget *area = gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialog));
+    GtkWidget *scrolled = gtk_scrolled_window_new();
+    gtk_widget_add_css_class(scrolled, "transparent-scrolled");
+    gtk_widget_set_size_request(scrolled, 300, 250);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), list_box);
+    gtk_box_append(GTK_BOX(area), scrolled);
+    
+    g_signal_connect(dialog, "response", G_CALLBACK(gtk_window_destroy), NULL);
+    
+    gtk_window_present(GTK_WINDOW(dialog));
 }
 
 void on_open_terminal_clicked(GtkButton *btn, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
     if (!self->current_path) return;
     /* Try common terminals */
-    const char *terms[] = { "kgx", "gnome-terminal", "xterm", "alacritty", NULL };
+    const char *terms[] = { "vater","kgx", "gnome-terminal", "xterm", "alacritty", NULL };
     for (int i = 0; terms[i]; i++) {
         char *cmd = g_strdup_printf("%s --working-directory=\"%s\" &",
                                     terms[i], self->current_path);

@@ -199,7 +199,7 @@ static void draw_sidebar_toggle(GtkDrawingArea *area, cairo_t *cr, int width, in
     } else {
         cairo_move_to(cr, x + w/3 + 3, y + h/2 - 2.5);
         cairo_line_to(cr, x + w/3 + 5.5, y + h/2);
-        cairo_line_to(cr, x + w/3 + 3, y + h/2 + 2.5);
+    cairo_line_to(cr, x + w/3 + 3, y + h/2 + 2.5);
         cairo_stroke(cr);
     }
 }
@@ -212,6 +212,26 @@ static void on_hidden_toggled(GtkToggleButton *btn, gpointer user_data) {
         gtk_filter_changed(GTK_FILTER(self->name_filter), GTK_FILTER_CHANGE_DIFFERENT);
     }
     update_statusbar(self);
+}
+
+static void on_create_document_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    on_new_document_clicked(NULL, user_data);
+}
+
+static void on_create_folder_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    on_new_folder_clicked(NULL, user_data);
+}
+
+static void on_open_terminal_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    on_open_terminal_clicked(NULL, user_data);
+}
+
+static void on_select_all_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    on_select_all_clicked(NULL, user_data);
 }
 
 
@@ -533,6 +553,27 @@ static void aether_window_init(AetherWindow *self) {
     g_signal_connect(toggle_hidden, "activate", G_CALLBACK(on_toggle_hidden), self);
     g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(toggle_hidden));
     g_object_unref(toggle_hidden);
+
+    /* Context menu actions */
+    GSimpleAction *create_doc = g_simple_action_new("create-document", NULL);
+    g_signal_connect(create_doc, "activate", G_CALLBACK(on_create_document_action), self);
+    g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(create_doc));
+    g_object_unref(create_doc);
+
+    GSimpleAction *create_folder = g_simple_action_new("create-folder", NULL);
+    g_signal_connect(create_folder, "activate", G_CALLBACK(on_create_folder_action), self);
+    g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(create_folder));
+    g_object_unref(create_folder);
+
+    GSimpleAction *open_term = g_simple_action_new("open-terminal", NULL);
+    g_signal_connect(open_term, "activate", G_CALLBACK(on_open_terminal_action), self);
+    g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(open_term));
+    g_object_unref(open_term);
+
+    GSimpleAction *sel_all = g_simple_action_new("select-all", NULL);
+    g_signal_connect(sel_all, "activate", G_CALLBACK(on_select_all_action), self);
+    g_action_map_add_action(G_ACTION_MAP(self), G_ACTION(sel_all));
+    g_object_unref(sel_all);
 
     /* ══ Drag & Drop ══ */
     setup_drag_drop(self, self->grid_view);

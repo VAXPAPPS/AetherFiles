@@ -38,8 +38,9 @@ void load_directory(AetherWindow *self, const char *path) {
     /* Clear forward stack on new navigation */
     g_ptr_array_set_size(self->fwd_stack, 0);
 
+    char *new_path = g_strdup(path);
     g_free(self->current_path);
-    self->current_path = g_strdup(path);
+    self->current_path = new_path;
     update_path_css_class(self);
     update_pathbar(self);
     update_nav_buttons(self);
