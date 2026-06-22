@@ -836,7 +836,7 @@ static void on_set_background_action(GSimpleAction *action, GVariant *parameter,
     if (!path) return;
 
     const char *config_dir = g_get_user_config_dir();
-    char *vaxp_dir = g_build_filename(config_dir, "vaxp", NULL);
+    char *vaxp_dir = g_build_filename(config_dir, "vaxp/desktop", NULL);
     g_mkdir_with_parents(vaxp_dir, 0755);
 
     char *wallpaper_file = g_build_filename(vaxp_dir, "wallpaper", NULL);
