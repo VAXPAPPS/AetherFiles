@@ -2,6 +2,7 @@
 #include <glib.h>
 #include <gio/gio.h>
 #include <string.h>
+#include "../../data/privileged_file_manager.h"
 
 struct _AetherClipboardController {
     GStrv            paths;
@@ -89,7 +90,7 @@ gboolean aether_clipboard_validate_sources(AetherClipboardController *self, char
 }
 
 /* ── Forward Declarations ── */
-static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move);
+static gboolean merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move, GError **error);
 
 /* ── Paste ── */
 
@@ -129,6 +130,23 @@ static void check_paste_completion(PasteData *pd) {
     }
 }
 
+
+static void on_priv_op_done(GObject *src, GAsyncResult *res, gpointer user_data) {
+    (void)src;
+    PasteItemData *item = user_data;
+    PasteData     *pd   = item->pd;
+    GError        *err  = NULL;
+    if (!aether_privileged_op_finish(res, &err)) {
+        pd->has_error = TRUE;
+        if (!pd->first_error) pd->first_error = err;
+        else g_error_free(err);
+    }
+    g_object_unref(item->src);
+    g_object_unref(item->dest);
+    g_free(item);
+    check_paste_completion(pd);
+}
+
 static void on_copy_done(GObject *src, GAsyncResult *res, gpointer user_data) {
     PasteItemData *item = user_data;
     PasteData     *pd   = item->pd;
@@ -137,7 +155,29 @@ static void on_copy_done(GObject *src, GAsyncResult *res, gpointer user_data) {
     if (err) {
         if (err->code == G_IO_ERROR_WOULD_RECURSE) {
             g_error_free(err);
-            merge_copy_recursive(item->src, item->dest, FALSE);
+            GError *merge_err = NULL;
+            if (!merge_copy_recursive(item->src, item->dest, FALSE, &merge_err)) {
+                if (merge_err && merge_err->code == G_IO_ERROR_PERMISSION_DENIED && aether_privileged_is_available()) {
+                    g_error_free(merge_err);
+                    if (!aether_privileged_daemon_is_running()) aether_privileged_daemon_start();
+                    char *sp = g_file_get_path(item->src);
+                    char *dp = g_file_get_path(item->dest);
+                    aether_privileged_copy_async(sp, dp, on_priv_op_done, item);
+                    g_free(sp); g_free(dp);
+                    return;
+                }
+                pd->has_error = TRUE;
+                if (!pd->first_error) pd->first_error = merge_err;
+                else if (merge_err) g_error_free(merge_err);
+            }
+        } else if (err->code == G_IO_ERROR_PERMISSION_DENIED && aether_privileged_is_available()) {
+            g_error_free(err);
+            if (!aether_privileged_daemon_is_running()) aether_privileged_daemon_start();
+            char *sp = g_file_get_path(item->src);
+            char *dp = g_file_get_path(item->dest);
+            aether_privileged_copy_async(sp, dp, on_priv_op_done, item);
+            g_free(sp); g_free(dp);
+            return;
         } else {
             pd->has_error = TRUE;
             if (!pd->first_error) pd->first_error = err;
@@ -162,9 +202,29 @@ static void on_move_done(GObject *src, GAsyncResult *res, gpointer user_data) {
             g_printerr("Cross-device move or merge detected. Falling back to merge_copy_recursive.\n");
             g_error_free(err);
             
-            /* Since merge_copy_recursive is synchronous, we run it directly here. 
-             * It's not ideal for UI thread but it fixes the edge case. */
-            merge_copy_recursive(item->src, item->dest, TRUE);
+            GError *merge_err = NULL;
+            if (!merge_copy_recursive(item->src, item->dest, TRUE, &merge_err)) {
+                if (merge_err && merge_err->code == G_IO_ERROR_PERMISSION_DENIED && aether_privileged_is_available()) {
+                    g_error_free(merge_err);
+                    if (!aether_privileged_daemon_is_running()) aether_privileged_daemon_start();
+                    char *sp = g_file_get_path(item->src);
+                    char *dp = g_file_get_path(item->dest);
+                    aether_privileged_move_async(sp, dp, on_priv_op_done, item);
+                    g_free(sp); g_free(dp);
+                    return;
+                }
+                pd->has_error = TRUE;
+                if (!pd->first_error) pd->first_error = merge_err;
+                else if (merge_err) g_error_free(merge_err);
+            }
+        } else if (err->code == G_IO_ERROR_PERMISSION_DENIED && aether_privileged_is_available()) {
+            g_error_free(err);
+            if (!aether_privileged_daemon_is_running()) aether_privileged_daemon_start();
+            char *sp = g_file_get_path(item->src);
+            char *dp = g_file_get_path(item->dest);
+            aether_privileged_move_async(sp, dp, on_priv_op_done, item);
+            g_free(sp); g_free(dp);
+            return;
         } else {
             pd->has_error = TRUE;
             if (!pd->first_error) pd->first_error = err;
@@ -330,8 +390,17 @@ void aether_clipboard_paste_keep_both(AetherClipboardController *self,
         else
             g_file_move(src, dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &err);
         if (err) {
-            g_printerr("Keep-both error for %s: %s\n", basename, err->message);
-            g_error_free(err);
+            if (err->code == G_IO_ERROR_PERMISSION_DENIED && aether_privileged_is_available()) {
+                g_error_free(err);
+                if (!aether_privileged_daemon_is_running()) aether_privileged_daemon_start();
+                if (self->op == AETHER_CLIPBOARD_COPY)
+                    aether_privileged_copy_async(self->paths[i], dest_path, NULL, NULL);
+                else
+                    aether_privileged_move_async(self->paths[i], dest_path, NULL, NULL);
+            } else {
+                g_printerr("Keep-both error for %s: %s\n", basename, err->message);
+                g_error_free(err);
+            }
         }
 
         g_object_unref(src);
@@ -360,7 +429,7 @@ void aether_clipboard_paste_keep_both(AetherClipboardController *self,
  *
  * العملية: COPY (نسخ) أو MOVE (نقل وحذف المصدر بعد النسخ)
  */
-static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
+static gboolean merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move, GError **error) {
     GFileType src_type = g_file_query_file_type(src,
                              G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL);
     GFileType dst_type = g_file_query_file_type(dst,
@@ -390,19 +459,23 @@ static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
                 G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
                 NULL, &err);
             if (!en) {
+                if (err && err->code == G_IO_ERROR_PERMISSION_DENIED) {
+                    g_propagate_error(error, err);
+                    return FALSE;
+                }
                 if (err) {
                     g_printerr("merge_copy_recursive: cannot enumerate %s: %s\n",
                                g_file_peek_path(src), err->message);
                     g_error_free(err);
                 }
-                return;
+                return TRUE;
             }
             GFileInfo *info;
             while ((info = g_file_enumerator_next_file(en, NULL, NULL)) != NULL) {
                 const char *child_name = g_file_info_get_name(info);
                 GFile *child_src = g_file_get_child(src, child_name);
                 GFile *child_dst = g_file_get_child(dst, child_name);
-                merge_copy_recursive(child_src, child_dst, do_move);
+                if (!merge_copy_recursive(child_src, child_dst, do_move, error)) { g_object_unref(child_src); g_object_unref(child_dst); g_object_unref(info); g_object_unref(en); return FALSE; }
                 g_object_unref(child_src);
                 g_object_unref(child_dst);
                 g_object_unref(info);
@@ -431,7 +504,11 @@ static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
                 if (g_file_move(src, dst,
                                 G_FILE_COPY_NO_FALLBACK_FOR_MOVE,
                                 NULL, NULL, NULL, &mv_err)) {
-                    return; /* rename نجح */
+                    return TRUE; /* rename نجح */
+                }
+                if (mv_err && mv_err->code == G_IO_ERROR_PERMISSION_DENIED) {
+                    g_propagate_error(error, mv_err);
+                    return FALSE;
                 }
                 g_clear_error(&mv_err);
                 /*
@@ -443,11 +520,15 @@ static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
             /* أنشئ مجلد الوجهة */
             GError *mk_err = NULL;
             if (!g_file_make_directory(dst, NULL, &mk_err)) {
+                if (mk_err && mk_err->code == G_IO_ERROR_PERMISSION_DENIED) {
+                    g_propagate_error(error, mk_err);
+                    return FALSE;
+                }
                 g_printerr("merge: g_file_make_directory(%s) failed: %s\n",
                            g_file_peek_path(dst),
                            mk_err ? mk_err->message : "?");
                 g_clear_error(&mk_err);
-                return;
+                return TRUE;
             }
 
             /* dst أصبح الآن مجلداً — ادمج الأبناء بنفس المنطق أعلاه */
@@ -457,18 +538,22 @@ static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
                 G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
                 NULL, &en_err2);
             if (!en2) {
+                if (en_err2 && en_err2->code == G_IO_ERROR_PERMISSION_DENIED) {
+                    g_propagate_error(error, en_err2);
+                    return FALSE;
+                }
                 g_printerr("merge: enumerate %s failed: %s\n",
                            g_file_peek_path(src),
                            en_err2 ? en_err2->message : "?");
                 g_clear_error(&en_err2);
-                return;
+                return TRUE;
             }
             GFileInfo *info2;
             while ((info2 = g_file_enumerator_next_file(en2, NULL, NULL)) != NULL) {
                 const char *child_name = g_file_info_get_name(info2);
                 GFile *child_src = g_file_get_child(src, child_name);
                 GFile *child_dst = g_file_get_child(dst, child_name);
-                merge_copy_recursive(child_src, child_dst, do_move);
+                if (!merge_copy_recursive(child_src, child_dst, do_move, error)) { g_object_unref(child_src); g_object_unref(child_dst); g_object_unref(info2); g_object_unref(en2); return FALSE; }
                 g_object_unref(child_src);
                 g_object_unref(child_dst);
                 g_object_unref(info2);
@@ -478,6 +563,7 @@ static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
             if (do_move)
                 g_file_delete(src, NULL, NULL);
         }
+        return TRUE;
     } else {
         /* المصدر ملف عادي أو رابط رمزي (Symlink): استبدله في الوجهة دائماً */
         GError *err = NULL;
@@ -486,6 +572,10 @@ static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
         if (do_move) {
             if (!g_file_move(src, dst, flags, NULL, NULL, NULL, &err)) {
                 if (err) {
+                    if (err->code == G_IO_ERROR_PERMISSION_DENIED) {
+                        g_propagate_error(error, err);
+                        return FALSE;
+                    }
                     /* ── EC-07: معالجة خطأ القرص الممتلئ ── */
                     if (err->code == G_IO_ERROR_NO_SPACE) {
                         g_printerr("Disk full! Deleting partial file: %s\n", g_file_peek_path(dst));
@@ -499,6 +589,10 @@ static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
         } else {
             if (!g_file_copy(src, dst, flags, NULL, NULL, NULL, &err)) {
                 if (err) {
+                    if (err->code == G_IO_ERROR_PERMISSION_DENIED) {
+                        g_propagate_error(error, err);
+                        return FALSE;
+                    }
                     /* ── EC-07: معالجة خطأ القرص الممتلئ ── */
                     if (err->code == G_IO_ERROR_NO_SPACE) {
                         g_printerr("Disk full! Deleting partial file: %s\n", g_file_peek_path(dst));
@@ -511,6 +605,7 @@ static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
             }
         }
     }
+    return TRUE;
 }
 
 void aether_clipboard_paste_merge(AetherClipboardController *self,
@@ -526,7 +621,20 @@ void aether_clipboard_paste_merge(AetherClipboardController *self,
         char  *dst_path = g_build_filename(dest_dir, basename, NULL);
         GFile *dst      = g_file_new_for_path(dst_path);
 
-        merge_copy_recursive(src, dst, do_move);
+        GError *err = NULL;
+        if (!merge_copy_recursive(src, dst, do_move, &err)) {
+            if (err && err->code == G_IO_ERROR_PERMISSION_DENIED && aether_privileged_is_available()) {
+                g_error_free(err);
+                if (!aether_privileged_daemon_is_running()) aether_privileged_daemon_start();
+                if (do_move)
+                    aether_privileged_move_async(self->paths[i], dst_path, NULL, NULL);
+                else
+                    aether_privileged_copy_async(self->paths[i], dst_path, NULL, NULL);
+            } else if (err) {
+                g_printerr("Merge copy failed: %s\n", err->message);
+                g_error_free(err);
+            }
+        }
 
         g_object_unref(src);
         g_object_unref(dst);
