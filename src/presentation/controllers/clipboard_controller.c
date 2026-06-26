@@ -36,8 +36,60 @@ AetherClipboardOp aether_clipboard_get_op(AetherClipboardController *self) {
 }
 
 GStrv aether_clipboard_get_paths(AetherClipboardController *self) {
-    return self->paths;
+    g_return_val_if_fail(self != NULL, NULL);
+    return self->paths; /* يُفضل إرجاع نسخة إذا لزم الأمر، لكن حالياً نرجع المؤشر للسهولة */
 }
+
+gboolean aether_clipboard_is_same_location(AetherClipboardController *self, const char *dest_dir) {
+    g_return_val_if_fail(self != NULL, FALSE);
+    if (!self->paths || !dest_dir) return FALSE;
+    for (int i = 0; self->paths[i]; i++) {
+        char *parent = g_path_get_dirname(self->paths[i]);
+        gboolean same = (g_strcmp0(parent, dest_dir) == 0);
+        g_free(parent);
+        if (!same) return FALSE;
+    }
+    return TRUE;
+}
+
+gboolean aether_clipboard_validate_sources(AetherClipboardController *self, char **out_missing_msg) {
+    g_return_val_if_fail(self != NULL, FALSE);
+    if (!self->paths || !self->paths[0]) return TRUE; /* Empty is technically valid/no missing sources */
+
+    GString *missing = g_string_new("");
+    int missing_count = 0;
+
+    for (int i = 0; self->paths[i]; i++) {
+        if (!g_file_test(self->paths[i], G_FILE_TEST_EXISTS)) {
+            char *basename = g_path_get_basename(self->paths[i]);
+            if (missing_count > 0) g_string_append(missing, "\n");
+            g_string_append_printf(missing, "• %s", basename);
+            g_free(basename);
+            missing_count++;
+        }
+    }
+
+    if (missing_count > 0) {
+        if (out_missing_msg) {
+            *out_missing_msg = g_strdup_printf(
+                "Cannot complete operation. %d source item%s no longer exist:\n\n%s",
+                missing_count, missing_count > 1 ? "s" : "", missing->str
+            );
+        }
+        g_string_free(missing, TRUE);
+        
+        /* EC-03: مسح الحافظة لأنها تحتوي ملفات محذوفة */
+        aether_clipboard_set(self, NULL, AETHER_CLIPBOARD_NONE);
+        return FALSE;
+    }
+
+    g_string_free(missing, TRUE);
+    if (out_missing_msg) *out_missing_msg = NULL;
+    return TRUE;
+}
+
+/* ── Forward Declarations ── */
+static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move);
 
 /* ── Paste ── */
 
@@ -48,7 +100,14 @@ typedef struct {
     int                        total;
     gboolean                   has_error;
     GError                    *first_error;
+    char                      *dest_dir;
 } PasteData;
+
+typedef struct {
+    PasteData *pd;
+    GFile     *src;
+    GFile     *dest;
+} PasteItemData;
 
 static void check_paste_completion(PasteData *pd) {
     pd->pending--;
@@ -64,32 +123,58 @@ static void check_paste_completion(PasteData *pd) {
             }
             g_task_return_boolean(pd->task, TRUE);
         }
+        g_free(pd->dest_dir);
         g_object_unref(pd->task);
         g_free(pd);
     }
 }
 
 static void on_copy_done(GObject *src, GAsyncResult *res, gpointer user_data) {
-    PasteData *pd  = user_data;
-    GError    *err = NULL;
+    PasteItemData *item = user_data;
+    PasteData     *pd   = item->pd;
+    GError        *err  = NULL;
     g_file_copy_finish(G_FILE(src), res, &err);
     if (err) {
-        pd->has_error = TRUE;
-        if (!pd->first_error) pd->first_error = err;
-        else g_error_free(err);
+        if (err->code == G_IO_ERROR_WOULD_RECURSE) {
+            g_error_free(err);
+            merge_copy_recursive(item->src, item->dest, FALSE);
+        } else {
+            pd->has_error = TRUE;
+            if (!pd->first_error) pd->first_error = err;
+            else g_error_free(err);
+        }
     }
+    g_object_unref(item->src);
+    g_object_unref(item->dest);
+    g_free(item);
     check_paste_completion(pd);
 }
 
 static void on_move_done(GObject *src, GAsyncResult *res, gpointer user_data) {
-    PasteData *pd  = user_data;
-    GError    *err = NULL;
+    PasteItemData *item = user_data;
+    PasteData     *pd   = item->pd;
+    GError        *err  = NULL;
     g_file_move_finish(G_FILE(src), res, &err);
+    
     if (err) {
-        pd->has_error = TRUE;
-        if (!pd->first_error) pd->first_error = err;
-        else g_error_free(err);
+        /* ── EC-10: Fallback to copy+delete for cross-filesystem move of directories ── */
+        if (err->code == G_IO_ERROR_NOT_SUPPORTED || err->code == G_IO_ERROR_WOULD_MERGE) {
+            g_printerr("Cross-device move or merge detected. Falling back to merge_copy_recursive.\n");
+            g_error_free(err);
+            
+            /* Since merge_copy_recursive is synchronous, we run it directly here. 
+             * It's not ideal for UI thread but it fixes the edge case. */
+            merge_copy_recursive(item->src, item->dest, TRUE);
+        } else {
+            pd->has_error = TRUE;
+            if (!pd->first_error) pd->first_error = err;
+            else g_error_free(err);
+        }
     }
+    
+    g_object_unref(item->src);
+    g_object_unref(item->dest);
+    g_free(item);
     check_paste_completion(pd);
 }
 
@@ -109,6 +194,9 @@ void aether_clipboard_paste_with_flags(AetherClipboardController *self,
                                         GAsyncReadyCallback       cb,
                                         gpointer                  user_data)
 {
+    /* EC-11: منع الـ loop في النسخ/النقل */
+    flags |= G_FILE_COPY_NOFOLLOW_SYMLINKS;
+    
     if (!self->paths || !self->paths[0] || self->op == AETHER_CLIPBOARD_NONE) return;
 
     GTask *task = g_task_new(NULL, NULL, cb, user_data);
@@ -121,24 +209,31 @@ void aether_clipboard_paste_with_flags(AetherClipboardController *self,
     pd->has_error  = FALSE;
     pd->first_error = NULL;
 
+    pd->dest_dir = g_strdup(dest_dir);
+
     for (int i = 0; i < pd->total; i++) {
         GFile *src      = g_file_new_for_path(self->paths[i]);
         char  *basename = g_path_get_basename(self->paths[i]);
         char  *dest_path = g_build_filename(dest_dir, basename, NULL);
         GFile *dest     = g_file_new_for_path(dest_path);
 
+        PasteItemData *item = g_new0(PasteItemData, 1);
+        item->pd   = pd;
+        item->src  = g_object_ref(src);
+        item->dest = g_object_ref(dest);
+
         if (self->op == AETHER_CLIPBOARD_COPY) {
             g_file_copy_async(src, dest,
                               flags,
                               G_PRIORITY_DEFAULT,
                               NULL, NULL, NULL,
-                              on_copy_done, pd);
+                              on_copy_done, item);
         } else { /* CUT */
             g_file_move_async(src, dest,
                               flags,
                               G_PRIORITY_DEFAULT,
                               NULL, NULL, NULL,
-                              on_move_done, pd);
+                              on_move_done, item);
         }
 
         g_free(basename);
@@ -274,6 +369,19 @@ static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
     if (src_type == G_FILE_TYPE_DIRECTORY) {
         /* المصدر مجلد */
         if (dst_type == G_FILE_TYPE_DIRECTORY) {
+            /* ── EC-13: نقل مجلد للقراءة فقط → منح المالك صلاحية كتابة للتمكن من الدمج ── */
+            GFileInfo *dst_info = g_file_query_info(dst, G_FILE_ATTRIBUTE_UNIX_MODE, 0, NULL, NULL);
+            if (dst_info) {
+                if (g_file_info_has_attribute(dst_info, G_FILE_ATTRIBUTE_UNIX_MODE)) {
+                    guint32 mode = g_file_info_get_attribute_uint32(dst_info, G_FILE_ATTRIBUTE_UNIX_MODE);
+                    if (!(mode & 0200)) { /* لا يملك صلاحية الكتابة */
+                        g_file_set_attribute_uint32(dst, G_FILE_ATTRIBUTE_UNIX_MODE, mode | 0200,
+                                                    G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL, NULL);
+                    }
+                }
+                g_object_unref(dst_info);
+            }
+
             /* الوجهة أيضاً مجلد: ادمج المحتوى تعاودياً */
             GError *err = NULL;
             GFileEnumerator *en = g_file_enumerate_children(
@@ -371,20 +479,33 @@ static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
                 g_file_delete(src, NULL, NULL);
         }
     } else {
-        /* المصدر ملف عادي: استبدله في الوجهة دائماً */
+        /* المصدر ملف عادي أو رابط رمزي (Symlink): استبدله في الوجهة دائماً */
         GError *err = NULL;
-        GFileCopyFlags flags = G_FILE_COPY_OVERWRITE;
+        /* EC-11: منع اتباع الروابط الرمزية بنسخ الرابط نفسه بدلاً من هدفه */
+        GFileCopyFlags flags = G_FILE_COPY_OVERWRITE | G_FILE_COPY_NOFOLLOW_SYMLINKS;
         if (do_move) {
             if (!g_file_move(src, dst, flags, NULL, NULL, NULL, &err)) {
                 if (err) {
-                    g_printerr("merge move file error: %s\n", err->message);
+                    /* ── EC-07: معالجة خطأ القرص الممتلئ ── */
+                    if (err->code == G_IO_ERROR_NO_SPACE) {
+                        g_printerr("Disk full! Deleting partial file: %s\n", g_file_peek_path(dst));
+                        g_file_delete(dst, NULL, NULL); /* حذف الملف الجزئي/المشوه */
+                    } else {
+                        g_printerr("merge move file error: %s\n", err->message);
+                    }
                     g_error_free(err);
                 }
             }
         } else {
             if (!g_file_copy(src, dst, flags, NULL, NULL, NULL, &err)) {
                 if (err) {
-                    g_printerr("merge copy file error: %s\n", err->message);
+                    /* ── EC-07: معالجة خطأ القرص الممتلئ ── */
+                    if (err->code == G_IO_ERROR_NO_SPACE) {
+                        g_printerr("Disk full! Deleting partial file: %s\n", g_file_peek_path(dst));
+                        g_file_delete(dst, NULL, NULL); /* حذف الملف الجزئي/المشوه */
+                    } else {
+                        g_printerr("merge copy file error: %s\n", err->message);
+                    }
                     g_error_free(err);
                 }
             }

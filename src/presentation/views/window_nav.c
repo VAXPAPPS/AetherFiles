@@ -135,7 +135,9 @@ typedef struct {
     GtkFilterListModel *filter_model;
     GtkCustomFilter *name_filter;
     GtkCustomSorter *sorter;
+    guint load_serial; /* جيل التحميل: يتجاهل set_model_idle أي نتيجة قديمة */
 } ModelUpdateData;
+
 
 /* ── بيانات حوار تأكيد الصلاحيات ── */
 typedef struct {
@@ -151,6 +153,22 @@ static void on_selection_changed(GtkSelectionModel *model, guint pos, guint n_it
 
 static gboolean set_model_idle(gpointer user_data) {
     ModelUpdateData *d = user_data;
+
+    /*
+     * Race condition guard:
+     * إذا جاء تحميل آخر بعدنا (من file monitor أو من load متوازي)
+     * فإن load_serial سيكون أصغر من القيمة الحالية → تجاهل هذا النتيجة.
+     * هذا يمنع set_model_idle من تحرير filter_model بينما GTK
+     * لا يزال يستخدمه (سبب ال crash السابق).
+     */
+    if (d->load_serial != d->window->load_serial) {
+        /* نتيجة قديمة: حرر فقط الكائنات الجديدة دون لمس window state */
+        g_object_unref(d->grid_sel);
+        g_object_unref(d->list_sel);
+        /* filter_model وغيره محفوظة بمرجع في grid_sel/list_sel */
+        g_free(d);
+        return G_SOURCE_REMOVE;
+    }
 
     /* أولاً: اجعل الـ views يشير لـ NULL لتجنب الوصول لموارد محررة */
     gtk_grid_view_set_model(GTK_GRID_VIEW(d->window->grid_view), NULL);
@@ -198,6 +216,7 @@ static gboolean set_model_idle(gpointer user_data) {
     g_free(d);
     return G_SOURCE_REMOVE;
 }
+
 
 
 /* ── صلاحيات الجلسة: TRUE بعد أول موافقة من المستخدم ── */
@@ -327,6 +346,9 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
     GtkMultiSelection *grid_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
     GtkMultiSelection *list_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
 
+    /* زِد العداد لإبطال أي set_model_idle قديم معلّق في قائمة الانتظار */
+    self->load_serial++;
+
     ModelUpdateData *d = g_new0(ModelUpdateData, 1);
     d->window = self;
     d->grid_sel = grid_sel;
@@ -334,8 +356,10 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
     d->filter_model = filtered;
     d->name_filter = filter;
     d->sorter = sorter;
+    d->load_serial = self->load_serial; /* التقط القيمة الحالية */
 
     g_idle_add(set_model_idle, d);
+
 
     /* Start file monitor for current directory */
     setup_file_monitor(self, self->current_path);
@@ -410,6 +434,9 @@ void on_elevated_list_done(GObject *source, GAsyncResult *res, gpointer ud) {
     GtkMultiSelection *grid_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
     GtkMultiSelection *list_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
 
+    /* زِد العداد لإبطال أي set_model_idle قديم معلّق */
+    self->load_serial++;
+
     ModelUpdateData *d = g_new0(ModelUpdateData, 1);
     d->window     = self;
     d->grid_sel   = grid_sel;
@@ -417,8 +444,10 @@ void on_elevated_list_done(GObject *source, GAsyncResult *res, gpointer ud) {
     d->filter_model = filtered;
     d->name_filter  = filter;
     d->sorter       = sorter;
+    d->load_serial  = self->load_serial; /* التقط القيمة الحالية */
 
     g_idle_add(set_model_idle, d);
+
 
     /* لا نفعّل file monitor للمسارات المحمية (pkexec لا يدعم GFileMonitor) */
 }
@@ -493,8 +522,37 @@ void on_dir_changed(GFileMonitor *mon, GFile *file, GFile *other,
     AetherWindow *self = AETHER_WINDOW(user_data);
     /* Debounce: only react to meaningful events */
     switch (event) {
-    case G_FILE_MONITOR_EVENT_CREATED:
     case G_FILE_MONITOR_EVENT_DELETED:
+        /* EC-12: تحقق إذا كان المجلد المحذوف هو المجلد الحالي نفسه */
+        if (self->current_path && file) {
+            char *deleted_path = g_file_get_path(file);
+            if (g_strcmp0(deleted_path, self->current_path) == 0) {
+                g_free(deleted_path);
+                
+                /* المجلد الحالي حُذف! ننتقل للمجلد الأب أو للرئيسي */
+                char *parent = g_path_get_dirname(self->current_path);
+                if (g_file_test(parent, G_FILE_TEST_IS_DIR)) {
+                    load_directory(self, parent);
+                } else {
+                    load_directory(self, g_get_home_dir());
+                }
+                g_free(parent);
+                
+                /* إظهار تنبيه للمستخدم */
+                GtkWidget *toast = gtk_message_dialog_new(GTK_WINDOW(self),
+                                                          GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                                          GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+                                                          "Directory Deleted");
+                gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(toast),
+                                                         "The directory you were viewing was deleted or moved.");
+                g_signal_connect(toast, "response", G_CALLBACK(gtk_window_destroy), NULL);
+                gtk_window_present(GTK_WINDOW(toast));
+                break;
+            }
+            g_free(deleted_path);
+        }
+        /* fallthrough لتحديث العرض للملفات المحذوفة العادية */
+    case G_FILE_MONITOR_EVENT_CREATED:
     case G_FILE_MONITOR_EVENT_RENAMED:
     case G_FILE_MONITOR_EVENT_MOVED_IN:
     case G_FILE_MONITOR_EVENT_MOVED_OUT:
@@ -568,17 +626,32 @@ void on_item_activated(GtkWidget *view, guint position, gpointer user_data) {
 #ifdef G_OS_UNIX
         /* Special handling for .desktop files */
         if (!executed && path && g_str_has_suffix(path, ".desktop")) {
-            GDesktopAppInfo *app_info = g_desktop_app_info_new_from_filename(path);
-            if (app_info) {
-                GError *err = NULL;
-                if (g_app_info_launch(G_APP_INFO(app_info), NULL, NULL, &err)) {
-                    executed = TRUE;
+            GKeyFile *kf = g_key_file_new();
+            if (g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) {
+                gchar *type = g_key_file_get_string(kf, "Desktop Entry", "Type", NULL);
+                if (g_strcmp0(type, "Link") == 0) {
+                    gchar *link_url = g_key_file_get_string(kf, "Desktop Entry", "URL", NULL);
+                    if (link_url) {
+                        g_app_info_launch_default_for_uri_async(link_url, NULL, NULL, NULL, NULL);
+                        executed = TRUE;
+                        g_free(link_url);
+                    }
                 } else {
-                    g_printerr("Failed to launch desktop file: %s\n", err->message);
-                    g_error_free(err);
+                    GDesktopAppInfo *app_info = g_desktop_app_info_new_from_keyfile(kf);
+                    if (app_info) {
+                        GError *err = NULL;
+                        if (g_app_info_launch(G_APP_INFO(app_info), NULL, NULL, &err)) {
+                            executed = TRUE;
+                        } else {
+                            g_printerr("Failed to launch desktop file: %s\n", err->message);
+                            g_error_free(err);
+                        }
+                        g_object_unref(app_info);
+                    }
                 }
-                g_object_unref(app_info);
+                g_free(type);
             }
+            g_key_file_free(kf);
         }
 #endif
 

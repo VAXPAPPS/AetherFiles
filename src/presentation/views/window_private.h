@@ -77,7 +77,15 @@ struct _AetherWindow {
 
     /* وضع الصلاحيات المرتفعة - TRUE إذا كان المسار الحالي يتطلب صلاحيات root */
     gboolean elevated_mode;
+
+    /*
+     * load_serial: عداد يُزاد عند كل تحميل مجلد جديد.
+     * يُستخدم في set_model_idle للتحقق أن النتيجة لا تزال حديثة.
+     * يمنع race condition بين file monitor وexplicit load.
+     */
+    guint load_serial;
 };
+
 
 typedef struct {
     char      *path;

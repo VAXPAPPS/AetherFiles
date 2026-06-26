@@ -226,6 +226,34 @@ static void on_paste_action(GSimpleAction *action, GVariant *parameter, gpointer
     const char *dest = aether_window_get_current_path(win);
     if (!dest) return;
 
+    /* ── EC-06: منع اللصق في سلة المحذوفات ── */
+    if (g_str_has_prefix(dest, "trash://")) return;
+
+
+    /* ── EC-03: التأكد من وجود ملفات المصدر قبل البدء ── */
+    char *missing_msg = NULL;
+    if (!aether_clipboard_validate_sources(app->clipboard, &missing_msg)) {
+        GtkWidget *err_dlg = gtk_message_dialog_new(
+            GTK_WINDOW(win),
+            GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+            GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+            "Source Files Missing");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(err_dlg), "%s", missing_msg);
+        g_free(missing_msg);
+        g_signal_connect_swapped(err_dlg, "response", G_CALLBACK(gtk_window_destroy), err_dlg);
+        gtk_window_present(GTK_WINDOW(err_dlg));
+        if (win) aether_window_reload(win); /* لتحديث الواجهة في حال كانت الملفات مقصوصة */
+        return;
+    }
+
+    /* ── EC-01: إذا كان نسخاً ولصقاً في نفس المكان → إنشاء نسخة (Keep Both) تلقائياً ── */
+    if (aether_clipboard_get_op(app->clipboard) == AETHER_CLIPBOARD_COPY &&
+        aether_clipboard_is_same_location(app->clipboard, dest)) {
+        aether_clipboard_paste_keep_both(app->clipboard, dest);
+        if (win) aether_window_reload(win);
+        return;
+    }
+
     /* فحص التعارضات أولاً */
     GPtrArray *conflicts = aether_clipboard_find_conflicts(app->clipboard, dest);
     if (conflicts->len > 0) {
@@ -284,6 +312,45 @@ static void on_paste_action(GSimpleAction *action, GVariant *parameter, gpointer
 }
 
 /* ── rename ── */
+typedef struct {
+    AetherApplication *app;
+    char *src_path;
+    char *dest_path;
+} RenameConflictData;
+
+static void on_rename_conflict_response(GtkDialog *dlg, int response, gpointer user_data) {
+    RenameConflictData *d = user_data;
+    gtk_window_destroy(GTK_WINDOW(dlg));
+
+    if (response == GTK_RESPONSE_ACCEPT) {
+        GFile *src = g_file_new_for_path(d->src_path);
+        GFile *dest = g_file_new_for_path(d->dest_path);
+        GError *err = NULL;
+
+        /* EC-05: استخدام move مع OVERWRITE لاستبدال الملف المتعارض */
+        if (!g_file_move(src, dest, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &err)) {
+            if (err && err->code == G_IO_ERROR_PERMISSION_DENIED && aether_privileged_is_available()) {
+                g_error_free(err);
+                AetherWindow *w = get_active_win(G_APPLICATION(d->app));
+                aether_privileged_move_async(d->src_path, d->dest_path, (GAsyncReadyCallback)on_privileged_op_done, w);
+            } else {
+                g_printerr("Rename replace error: %s\n", err ? err->message : "?");
+                if (err) g_error_free(err);
+            }
+        } else {
+            AetherWindow *w = get_active_win(G_APPLICATION(d->app));
+            if (w) aether_window_reload(w);
+        }
+
+        g_object_unref(src);
+        g_object_unref(dest);
+    }
+
+    g_free(d->src_path);
+    g_free(d->dest_path);
+    g_free(d);
+}
+
 static void on_rename_response(GtkDialog *d, int response_id, gpointer ud) {
     (void)ud;
     if (response_id != GTK_RESPONSE_ACCEPT) {
@@ -296,6 +363,30 @@ static void on_rename_response(GtkDialog *d, int response_id, gpointer ud) {
     const char *new_name = gtk_editable_get_text(GTK_EDITABLE(ent));
     if (!new_name || new_name[0] == '\0') {
         gtk_window_destroy(GTK_WINDOW(d));
+        return;
+    }
+    
+    /* ── EC-15: منع الأسماء غير الصالحة أو الطويلة ── */
+    if (strchr(new_name, '/')) {
+        GtkWidget *err_dlg = gtk_message_dialog_new(GTK_WINDOW(d),
+                                                    GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                                    GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                                                    "Invalid Filename");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(err_dlg),
+                                                 "Filenames cannot contain the '/' character.");
+        g_signal_connect_swapped(err_dlg, "response", G_CALLBACK(gtk_window_destroy), err_dlg);
+        gtk_window_present(GTK_WINDOW(err_dlg));
+        return;
+    }
+    if (strlen(new_name) > 255) {
+        GtkWidget *err_dlg = gtk_message_dialog_new(GTK_WINDOW(d),
+                                                    GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                                    GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                                                    "Filename Too Long");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(err_dlg),
+                                                 "Filenames cannot exceed 255 characters.");
+        g_signal_connect_swapped(err_dlg, "response", G_CALLBACK(gtk_window_destroy), err_dlg);
+        gtk_window_present(GTK_WINDOW(err_dlg));
         return;
     }
     GFile  *file = g_file_parse_name(src);
@@ -313,6 +404,80 @@ static void on_rename_response(GtkDialog *d, int response_id, gpointer ud) {
                 (GAsyncReadyCallback)on_privileged_op_done, w2);
             g_free(parent);
             g_free(new_path);
+        /* ── EC-05: اسم موجود بالفعل ── */
+        } else if (err->code == G_IO_ERROR_EXISTS) {
+            g_error_free(err);
+            
+            char *parent = g_path_get_dirname(src);
+            char *new_path = g_build_filename(parent, new_name, NULL);
+            g_free(parent);
+
+            /* ── EC-17: معالجة تعارض الأحرف (Case Sensitivity) للأنظمة مثل FAT32 ── */
+            GFile *dest_file = g_file_new_for_path(new_path);
+            GFileInfo *src_info = g_file_query_info(file, G_FILE_ATTRIBUTE_ID_FILE, G_FILE_QUERY_INFO_NONE, NULL, NULL);
+            GFileInfo *dst_info = g_file_query_info(dest_file, G_FILE_ATTRIBUTE_ID_FILE, G_FILE_QUERY_INFO_NONE, NULL, NULL);
+            gboolean is_same_file = FALSE;
+            
+            if (src_info && dst_info) {
+                const char *src_id = g_file_info_get_attribute_string(src_info, G_FILE_ATTRIBUTE_ID_FILE);
+                const char *dst_id = g_file_info_get_attribute_string(dst_info, G_FILE_ATTRIBUTE_ID_FILE);
+                if (src_id && dst_id && g_strcmp0(src_id, dst_id) == 0) {
+                    is_same_file = TRUE;
+                }
+            }
+            if (src_info) g_object_unref(src_info);
+            if (dst_info) g_object_unref(dst_info);
+            
+            if (is_same_file) {
+                /* هذا نفس الملف تماماً، المشكلة فقط في تغيير حالة الأحرف على قرص لا يدعم الـ Case Sensitivity.
+                   الحل: إعادة تسميته لاسم مؤقت أولاً، ثم للاسم الجديد. */
+                char *tmp_name = g_strdup_printf("%s.tmp", new_name);
+                GFile *tmp_file = g_file_set_display_name(file, tmp_name, NULL, NULL);
+                if (tmp_file) {
+                    GFile *final_file = g_file_set_display_name(tmp_file, new_name, NULL, NULL);
+                    if (final_file) g_object_unref(final_file);
+                    g_object_unref(tmp_file);
+                }
+                g_free(tmp_name);
+                
+                AetherWindow *w = get_active_win(G_APPLICATION(a));
+                if (w) aether_window_reload(w);
+                
+                g_object_unref(dest_file);
+                g_free(new_path);
+                gtk_window_destroy(GTK_WINDOW(d));
+                if (file) g_object_unref(file);
+                return;
+            }
+            g_object_unref(dest_file);
+
+            GtkWidget *dlg = gtk_message_dialog_new(
+                GTK_WINDOW(d), /* نافذة إعادة التسمية كأب مؤقت، لكن دُمِّرت في نهاية الدالة. الأفضل win الأب */
+                GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE,
+                "File Conflict");
+            
+            char *msg = g_strdup_printf("A file named \"%s\" already exists. Do you want to replace it?", new_name);
+            gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dlg), "%s", msg);
+            g_free(msg);
+
+            gtk_dialog_add_button(GTK_DIALOG(dlg), "Cancel", GTK_RESPONSE_CANCEL);
+            GtkWidget *rb = gtk_dialog_add_button(GTK_DIALOG(dlg), "Replace", GTK_RESPONSE_ACCEPT);
+            gtk_widget_add_css_class(rb, "destructive-action");
+            gtk_dialog_set_default_response(GTK_DIALOG(dlg), GTK_RESPONSE_ACCEPT);
+
+            RenameConflictData *cdata = g_new0(RenameConflictData, 1);
+            cdata->app = a;
+            cdata->src_path = g_strdup(src);
+            cdata->dest_path = new_path; /* يأخذ ملكية */
+
+            /* نريد إظهار الحوار فوق النافذة الرئيسية لأن حوار إعادة التسمية سيتدمر الآن */
+            AetherWindow *main_win = get_active_win(G_APPLICATION(a));
+            gtk_window_set_transient_for(GTK_WINDOW(dlg), GTK_WINDOW(main_win));
+
+            g_signal_connect(dlg, "response", G_CALLBACK(on_rename_conflict_response), cdata);
+            gtk_window_present(GTK_WINDOW(dlg));
+
         } else {
             g_printerr("Rename error: %s\n", err->message);
             g_error_free(err);
@@ -425,6 +590,39 @@ static void on_privileged_trash_done(GObject *src, GAsyncResult *res, gpointer u
     g_free(ctx);
 }
 
+typedef struct {
+    AetherApplication *app;
+    GStrv paths;
+} PermDeleteCtx;
+
+static void on_perm_delete_response(GtkDialog *dialog, int response_id, gpointer user_data) {
+    PermDeleteCtx *ctx = user_data;
+    gtk_window_destroy(GTK_WINDOW(dialog));
+
+    if (response_id == GTK_RESPONSE_ACCEPT) {
+        AetherWindow *win = get_active_win(G_APPLICATION(ctx->app));
+        for (int i = 0; ctx->paths[i]; i++) {
+            GFile *f = g_file_new_for_path(ctx->paths[i]);
+            GError *err = NULL;
+            if (!g_file_delete(f, NULL, &err)) {
+                if (err && err->code == G_IO_ERROR_PERMISSION_DENIED && aether_privileged_is_available()) {
+                    TrashCtx *pctx = g_new0(TrashCtx, 1);
+                    pctx->app = ctx->app;
+                    pctx->path = g_strdup(ctx->paths[i]);
+                    aether_privileged_delete_async(ctx->paths[i], (GAsyncReadyCallback)on_privileged_trash_done, pctx);
+                }
+                if (err) g_error_free(err);
+            } else if (win) {
+                aether_window_reload(win);
+            }
+            g_object_unref(f);
+        }
+    }
+    
+    g_strfreev(ctx->paths);
+    g_free(ctx);
+}
+
 static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action; (void)parameter;
     AetherApplication *app = AETHER_APPLICATION(user_data);
@@ -432,6 +630,8 @@ static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer
     if (!win) return;
     GStrv paths = aether_window_get_selected_paths(win);
     if (!paths) return;
+    
+    GPtrArray *failed_paths = g_ptr_array_new_with_free_func(g_free);
     
     for (int i = 0; paths[i]; i++) {
         GFile  *f = g_file_parse_name(paths[i]);
@@ -446,6 +646,10 @@ static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer
                 ctx->path = g_strdup(paths[i]);
                 aether_privileged_delete_async(paths[i],
                     (GAsyncReadyCallback)on_privileged_trash_done, ctx);
+            } else if (err && err->code == G_IO_ERROR_NOT_SUPPORTED) {
+                /* EC-14: سلة المحذوفات غير مدعومة (فلاش ميموري مثلاً) */
+                g_ptr_array_add(failed_paths, g_strdup(paths[i]));
+                g_error_free(err);
             } else {
                 g_printerr("Trash failed: %s\n", err ? err->message : "?");
                 if (err) g_error_free(err);
@@ -454,6 +658,27 @@ static void on_trash_action(GSimpleAction *action, GVariant *parameter, gpointer
             aether_window_reload(win);
         }
         g_object_unref(f);
+    }
+    
+    if (failed_paths->len > 0) {
+        g_ptr_array_add(failed_paths, NULL);
+        PermDeleteCtx *pctx = g_new0(PermDeleteCtx, 1);
+        pctx->app = app;
+        pctx->paths = (GStrv)g_ptr_array_free(failed_paths, FALSE);
+        
+        GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(win),
+                                GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+                                GTK_MESSAGE_WARNING, GTK_BUTTONS_NONE,
+                                "Trash not supported on this device.");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog),
+                                "Do you want to permanently delete these items?");
+        gtk_dialog_add_button(GTK_DIALOG(dialog), "Cancel", GTK_RESPONSE_CANCEL);
+        gtk_dialog_add_button(GTK_DIALOG(dialog), "Delete Permanently", GTK_RESPONSE_ACCEPT);
+        
+        g_signal_connect(dialog, "response", G_CALLBACK(on_perm_delete_response), pctx);
+        gtk_window_present(GTK_WINDOW(dialog));
+    } else {
+        g_ptr_array_free(failed_paths, TRUE);
     }
     g_strfreev(paths);
 }
@@ -843,14 +1068,21 @@ static void on_set_background_action(GSimpleAction *action, GVariant *parameter,
     char *vaxp_dir = g_build_filename(config_dir, "vaxp/desktop", NULL);
     g_mkdir_with_parents(vaxp_dir, 0755);
 
-    char *wallpaper_file = g_build_filename(vaxp_dir, "wallpaper", NULL);
+    char *settings_file = g_build_filename(vaxp_dir, "desktop.vaxp", NULL);
+    
+    GKeyFile *kf = g_key_file_new();
+    g_key_file_load_from_file(kf, settings_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
+    
+    g_key_file_set_string(kf, "Desktop", "Wallpaper", path);
+    
     GError *err = NULL;
-    g_file_set_contents(wallpaper_file, path, -1, &err);
-    if (err) {
+    if (!g_key_file_save_to_file(kf, settings_file, &err)) {
         g_printerr("Failed to set background: %s\n", err->message);
         g_error_free(err);
     }
-    g_free(wallpaper_file);
+    
+    g_key_file_free(kf);
+    g_free(settings_file);
     g_free(vaxp_dir);
 }
 

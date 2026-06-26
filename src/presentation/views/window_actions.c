@@ -1,6 +1,7 @@
 #include "window_private.h"
 #include <glib/gi18n.h>
 #include <string.h>
+#include "../controllers/external_drop_controller.h"
 
 /* ── دالة مشتركة لإعادة التحميل بعد العملية المحمية ── */
 static void on_privileged_action_done(GObject *src, GAsyncResult *res, gpointer ud) {
@@ -451,6 +452,34 @@ void on_paste_toolbar_clicked(GtkButton *btn, gpointer user_data) {
     if (!self->current_path) return;
     if (!aether_clipboard_has_content(self->clipboard)) return;
 
+    /* ── EC-06: منع اللصق في سلة المحذوفات ── */
+    if (g_str_has_prefix(self->current_path, "trash://")) return;
+
+
+    /* ── EC-03: التأكد من وجود ملفات المصدر قبل البدء ── */
+    char *missing_msg = NULL;
+    if (!aether_clipboard_validate_sources(self->clipboard, &missing_msg)) {
+        GtkWidget *err_dlg = gtk_message_dialog_new(
+            GTK_WINDOW(self),
+            GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+            GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+            "Source Files Missing");
+        gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(err_dlg), "%s", missing_msg);
+        g_free(missing_msg);
+        g_signal_connect_swapped(err_dlg, "response", G_CALLBACK(gtk_window_destroy), err_dlg);
+        gtk_window_present(GTK_WINDOW(err_dlg));
+        load_directory(self, self->current_path);
+        return;
+    }
+
+    /* ── EC-01: إذا كان نسخاً ولصقاً في نفس المكان → إنشاء نسخة (Keep Both) تلقائياً ── */
+    if (aether_clipboard_get_op(self->clipboard) == AETHER_CLIPBOARD_COPY &&
+        aether_clipboard_is_same_location(self->clipboard, self->current_path)) {
+        aether_clipboard_paste_keep_both(self->clipboard, self->current_path);
+        load_directory(self, self->current_path);
+        return;
+    }
+
     /* فحص التعارضات أولاً */
     GPtrArray *conflicts = aether_clipboard_find_conflicts(
                                self->clipboard, self->current_path);
@@ -603,20 +632,59 @@ static gboolean dnd_is_same_location(GStrv paths, const char *dest_dir) {
         char    *parent   = g_path_get_dirname(paths[i]);
         gboolean same     = (g_strcmp0(parent, dest_dir) == 0);
         g_free(parent);
-        if (!same) return FALSE;  /* على الأقل ملف واحد من مكان مختلف */
+        if (!same) return FALSE;
     }
-    return TRUE; /* كل الملفات من نفس المجلد الوجهة */
+    return TRUE;
 }
+
+/*
+ * dnd_would_move_into_self:
+ * يكتشف محاولة نقل مجلد إلى نفسه أو إلى مجلد فرعي منه.
+ * هذا يُسبب حلقة لانهائية في merge_copy_recursive.
+ *
+ * أمثلة محظورة:
+ *   src=/home/x/Docs    dest=/home/x/Docs          (نفسه)
+ *   src=/home/x/Docs    dest=/home/x/Docs/SubDir    (مجلد فرعي)
+ *
+ * يُعيد TRUE إذا كانت أي عملية ستُسبب المشكلة.
+ */
+static gboolean dnd_would_move_into_self(GStrv paths, const char *dest_dir) {
+    if (!paths || !dest_dir) return FALSE;
+    for (int i = 0; paths[i]; i++) {
+        GFileType t = g_file_test(paths[i], G_FILE_TEST_IS_DIR)
+                      ? G_FILE_TYPE_DIRECTORY : G_FILE_TYPE_REGULAR;
+        if (t != G_FILE_TYPE_DIRECTORY) continue; /* الملفات العادية لا تُسبب مشكلة */
+
+        /* dest_dir == src_dir (نفس المجلد) */
+        if (g_strcmp0(dest_dir, paths[i]) == 0) return TRUE;
+
+        /* dest_dir يبدأ بـ src_dir + "/" → dest فرعي من src */
+        char *src_slash = g_strdup_printf("%s/", paths[i]);
+        gboolean is_child = g_str_has_prefix(dest_dir, src_slash);
+        g_free(src_slash);
+        if (is_child) return TRUE;
+    }
+    return FALSE;
+}
+
 
 gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
                                double x, double y, gpointer ud)
 {
     (void)t; (void)x; (void)y;
     AetherWindow *w = AETHER_WINDOW(ud);
+    if (!w->current_path) return FALSE;
+    
+    if (aether_external_drop_handle(w, val)) {
+        if (G_VALUE_HOLDS(val, G_TYPE_STRING)) {
+            return TRUE; /* تم التعامل مع النصوص أو روابط الويب عبر المعالج الخارجي بالكامل */
+        }
+    }
+    
     if (!G_VALUE_HOLDS(val, GDK_TYPE_FILE_LIST)) return FALSE;
     
     GdkFileList *file_list = g_value_get_boxed(val);
-    if (!file_list || !w->current_path) return FALSE;
+    if (!file_list) return FALSE;
     
     GdkDrop *drop = gtk_drop_target_get_current_drop(t);
     GdkDragAction action = drop ? gdk_drop_get_actions(drop) : GDK_ACTION_MOVE;
@@ -629,7 +697,15 @@ gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
     guint i = 0;
     for (GSList *l = files; l != NULL; l = l->next) {
         GFile *src_file = G_FILE(l->data);
-        paths[i++] = g_file_get_path(src_file);
+        char *path = g_file_get_path(src_file);
+        if (path) {
+            paths[i++] = path; /* نضيف المسارات المحلية فقط */
+        }
+    }
+    
+    if (i == 0) {
+        g_strfreev(paths);
+        return TRUE; /* لا توجد ملفات محلية، ربما كانت روابط ويب تم التعامل معها */
     }
 
     /*
@@ -640,7 +716,14 @@ gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
         g_strfreev(paths);
         return TRUE; /* استُهلك الإفلات بدون تأثير */
     }
-    
+
+    /* ── EC-02: منع نقل مجلد إلى نفسه أو مجلد فرعي منه ── */
+    if (dnd_would_move_into_self(paths, w->current_path)) {
+        g_strfreev(paths);
+        return TRUE;
+    }
+
+
     aether_clipboard_set(w->clipboard, paths, op);
     g_strfreev(paths);
     
@@ -658,8 +741,10 @@ gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
 
 
 void setup_drag_drop(AetherWindow *self, GtkWidget *view) {
-    GtkDropTarget *target = gtk_drop_target_new(GDK_TYPE_FILE_LIST,
+    GtkDropTarget *target = gtk_drop_target_new(G_TYPE_INVALID,
                                 GDK_ACTION_MOVE | GDK_ACTION_COPY);
+    GType types[] = { GDK_TYPE_FILE_LIST, G_TYPE_STRING };
+    gtk_drop_target_set_gtypes(target, types, G_N_ELEMENTS(types));
     g_signal_connect(target, "drop", G_CALLBACK(on_drop_target), self);
     gtk_widget_add_controller(view, GTK_EVENT_CONTROLLER(target));
 }
@@ -975,6 +1060,25 @@ void aether_window_handle_dnd_move(AetherWindow *win, const char *dest_path, GPt
     if (all_same) {
         g_ptr_array_free(src_paths, TRUE);
         return; /* إفلات في نفس المكان — لا شيء يحدث */
+    }
+
+    /* ── EC-02: منع نقل مجلد إلى نفسه أو مجلد فرعي منه ── */
+    for (guint k = 0; k < src_paths->len; k++) {
+        const char *sp = g_ptr_array_index(src_paths, k);
+        if (!sp || !g_file_test(sp, G_FILE_TEST_IS_DIR)) continue;
+        /* dest == src */
+        if (g_strcmp0(dest_path, sp) == 0) {
+            g_ptr_array_free(src_paths, TRUE);
+            return;
+        }
+        /* dest فرعي من src */
+        char *sp_slash = g_strdup_printf("%s/", sp);
+        gboolean into_self = g_str_has_prefix(dest_path, sp_slash);
+        g_free(sp_slash);
+        if (into_self) {
+            g_ptr_array_free(src_paths, TRUE);
+            return;
+        }
     }
 
     GPtrArray *conflicts = g_ptr_array_new_with_free_func(g_free);

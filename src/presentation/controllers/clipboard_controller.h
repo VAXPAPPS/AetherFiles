@@ -20,6 +20,10 @@ void              aether_clipboard_paste_finish     (AetherClipboardController *
 gboolean          aether_clipboard_has_content      (AetherClipboardController *self);
 AetherClipboardOp aether_clipboard_get_op           (AetherClipboardController *self);
 GStrv             aether_clipboard_get_paths        (AetherClipboardController *self);
+gboolean          aether_clipboard_is_same_location (AetherClipboardController *self, const char *dest_dir);
+
+/* EC-03: يتحقق هل كل ملفات المصدر ما زالت موجودة. يضع أسماء الملفات المفقودة في out_missing_msg إن وُجدت */
+gboolean          aether_clipboard_validate_sources (AetherClipboardController *self, char **out_missing_msg);
 
 /* يرجع قائمة أسماء الملفات المتعارضة (موجودة في الوجهة) */
 GPtrArray        *aether_clipboard_find_conflicts    (AetherClipboardController *self, const char *dest_dir);
