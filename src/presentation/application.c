@@ -199,11 +199,14 @@ static void on_app_conflict_response(GtkDialog *dlg, int response, gpointer user
     AetherWindow *win = get_active_win(G_APPLICATION(app));
 
     if (response == GTK_RESPONSE_ACCEPT) {
-        /* Replace */
-        if (win) aether_window_start_progress(win);
-        aether_clipboard_paste_with_flags(app->clipboard, d->dest_dir,
-                                          G_FILE_COPY_OVERWRITE,
-                                          on_paste_done, app);
+        /*
+         * Replace & Merge: استخدم paste_merge بدلاً من paste_with_flags(OVERWRITE).
+         * - ملفات المصدر تُستبدل في الوجهة
+         * - مجلدات المصدر تُدمج مع مجلدات الوجهة (لا تُحذف ملفات الوجهة)
+         * - ملفات الوجهة التي لا توجد في المصدر تبقى كما هي
+         */
+        aether_clipboard_paste_merge(app->clipboard, d->dest_dir);
+        if (win) aether_window_reload(win);
     } else if (response == GTK_RESPONSE_YES) {
         /* Keep Both */
         aether_clipboard_paste_keep_both(app->clipboard, d->dest_dir);
@@ -213,6 +216,7 @@ static void on_app_conflict_response(GtkDialog *dlg, int response, gpointer user
 
     app_conflict_data_free(d);
 }
+
 
 static void on_paste_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
     (void)action; (void)parameter;
@@ -259,7 +263,7 @@ static void on_paste_action(GSimpleAction *action, GVariant *parameter, gpointer
 
         gtk_dialog_add_button(GTK_DIALOG(dlg), "Cancel",    GTK_RESPONSE_CANCEL);
         gtk_dialog_add_button(GTK_DIALOG(dlg), "Keep Both", GTK_RESPONSE_YES);
-        GtkWidget *rb = gtk_dialog_add_button(GTK_DIALOG(dlg), "Replace",
+        GtkWidget *rb = gtk_dialog_add_button(GTK_DIALOG(dlg), "Replace & Merge",
                                               GTK_RESPONSE_ACCEPT);
         gtk_widget_add_css_class(rb, "destructive-action");
         gtk_dialog_set_default_response(GTK_DIALOG(dlg), GTK_RESPONSE_ACCEPT);

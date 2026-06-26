@@ -285,18 +285,25 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
     GListModel *raw = aether_file_repository_list_directory_finish(
                           AETHER_FILE_REPOSITORY(source), res, &err);
     if (err) {
-        /* ── اعتراض خطأ الصلاحيات: اسأل المستخدم أولاً ── */
-        if (err->code == G_IO_ERROR_PERMISSION_DENIED ||
-            err->code == G_IO_ERROR_NOT_FOUND) {
-            /* G_IO_ERROR_NOT_FOUND قد يحدث على مجلدات root */
-            if (self->current_path &&
-                aether_privileged_is_available()) {
+        /* ── اعتراض خطأ الصلاحيات: اسأل المستخدم فقط عند الحاجة الحقيقية ── */
+        if (err->code == G_IO_ERROR_PERMISSION_DENIED &&
+            self->current_path &&
+            aether_privileged_is_available()) {
+            /*
+             * لا نطلب رفع الصلاحيات إذا كان المسار ضمن مجلد
+             * المستخدم الحالي — المستخدم العادي يملك صلاحيات
+             * كافية هناك، والخطأ يكون بسبب سبب آخر.
+             */
+            const char *home = g_get_home_dir();
+            gboolean is_user_path = (home != NULL) &&
+                                    g_str_has_prefix(self->current_path, home);
+            if (!is_user_path) {
                 g_error_free(err);
                 ask_elevation(self, self->current_path);
                 return;
             }
         }
-        g_printerr("Error: %s\n", err->message);
+        g_printerr("Directory load error: %s\n", err->message);
         g_error_free(err);
         return;
     }

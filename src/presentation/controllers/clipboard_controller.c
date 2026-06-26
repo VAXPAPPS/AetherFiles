@@ -252,3 +252,172 @@ void aether_clipboard_paste_keep_both(AetherClipboardController *self,
         self->op    = AETHER_CLIPBOARD_NONE;
     }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+ * Paste Merge: دمج ذكي يحافظ على ملفات الوجهة غير الموجودة في المصدر
+ * ══════════════════════════════════════════════════════════════════ */
+
+/*
+ * دمج تعاودي: ينسخ كل محتوى src إلى dst مع دمج المجلدات بشكل ذكي.
+ * - إذا كان src مجلداً ودst مجلداً موجوداً: ادمج المحتوى تعاودياً
+ * - إذا كان src ملفاً: استبدله في الوجهة
+ * - إذا لم يكن dst موجوداً: انسخ مباشرةً
+ *
+ * العملية: COPY (نسخ) أو MOVE (نقل وحذف المصدر بعد النسخ)
+ */
+static void merge_copy_recursive(GFile *src, GFile *dst, gboolean do_move) {
+    GFileType src_type = g_file_query_file_type(src,
+                             G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL);
+    GFileType dst_type = g_file_query_file_type(dst,
+                             G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL);
+
+    if (src_type == G_FILE_TYPE_DIRECTORY) {
+        /* المصدر مجلد */
+        if (dst_type == G_FILE_TYPE_DIRECTORY) {
+            /* الوجهة أيضاً مجلد: ادمج المحتوى تعاودياً */
+            GError *err = NULL;
+            GFileEnumerator *en = g_file_enumerate_children(
+                src,
+                G_FILE_ATTRIBUTE_STANDARD_NAME,
+                G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                NULL, &err);
+            if (!en) {
+                if (err) {
+                    g_printerr("merge_copy_recursive: cannot enumerate %s: %s\n",
+                               g_file_peek_path(src), err->message);
+                    g_error_free(err);
+                }
+                return;
+            }
+            GFileInfo *info;
+            while ((info = g_file_enumerator_next_file(en, NULL, NULL)) != NULL) {
+                const char *child_name = g_file_info_get_name(info);
+                GFile *child_src = g_file_get_child(src, child_name);
+                GFile *child_dst = g_file_get_child(dst, child_name);
+                merge_copy_recursive(child_src, child_dst, do_move);
+                g_object_unref(child_src);
+                g_object_unref(child_dst);
+                g_object_unref(info);
+            }
+            g_object_unref(en);
+
+            /* إذا كان نقلاً: احذف المجلد المصدر الفارغ */
+            if (do_move) {
+                g_file_delete(src, NULL, NULL); /* يفشل بصمت إذا لم يكن فارغاً */
+            }
+        } else {
+            /*
+             * الوجهة غير موجودة (UNKNOWN) أو ملف عادي.
+             * نحذف الملف أولاً إن وُجد.
+             */
+            if (dst_type != G_FILE_TYPE_UNKNOWN)
+                g_file_delete(dst, NULL, NULL);
+
+            if (do_move) {
+                /*
+                 * نقل مجلد: جرّب rename أولاً (سريع — نفس جهاز التخزين).
+                 * G_FILE_COPY_NO_FALLBACK_FOR_MOVE يمنع GIO من نسخ+حذف
+                 * تلقائياً حتى نتمكن من معالجة الحالات بأنفسنا.
+                 */
+                GError *mv_err = NULL;
+                if (g_file_move(src, dst,
+                                G_FILE_COPY_NO_FALLBACK_FOR_MOVE,
+                                NULL, NULL, NULL, &mv_err)) {
+                    return; /* rename نجح */
+                }
+                g_clear_error(&mv_err);
+                /*
+                 * rename فشل (أجهزة مختلفة أو VFS) — أنشئ مجلد
+                 * الوجهة وانقل الأبناء يدوياً بشكل تعاودي.
+                 */
+            }
+
+            /* أنشئ مجلد الوجهة */
+            GError *mk_err = NULL;
+            if (!g_file_make_directory(dst, NULL, &mk_err)) {
+                g_printerr("merge: g_file_make_directory(%s) failed: %s\n",
+                           g_file_peek_path(dst),
+                           mk_err ? mk_err->message : "?");
+                g_clear_error(&mk_err);
+                return;
+            }
+
+            /* dst أصبح الآن مجلداً — ادمج الأبناء بنفس المنطق أعلاه */
+            GError *en_err2 = NULL;
+            GFileEnumerator *en2 = g_file_enumerate_children(
+                src, G_FILE_ATTRIBUTE_STANDARD_NAME,
+                G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                NULL, &en_err2);
+            if (!en2) {
+                g_printerr("merge: enumerate %s failed: %s\n",
+                           g_file_peek_path(src),
+                           en_err2 ? en_err2->message : "?");
+                g_clear_error(&en_err2);
+                return;
+            }
+            GFileInfo *info2;
+            while ((info2 = g_file_enumerator_next_file(en2, NULL, NULL)) != NULL) {
+                const char *child_name = g_file_info_get_name(info2);
+                GFile *child_src = g_file_get_child(src, child_name);
+                GFile *child_dst = g_file_get_child(dst, child_name);
+                merge_copy_recursive(child_src, child_dst, do_move);
+                g_object_unref(child_src);
+                g_object_unref(child_dst);
+                g_object_unref(info2);
+            }
+            g_object_unref(en2);
+
+            if (do_move)
+                g_file_delete(src, NULL, NULL);
+        }
+    } else {
+        /* المصدر ملف عادي: استبدله في الوجهة دائماً */
+        GError *err = NULL;
+        GFileCopyFlags flags = G_FILE_COPY_OVERWRITE;
+        if (do_move) {
+            if (!g_file_move(src, dst, flags, NULL, NULL, NULL, &err)) {
+                if (err) {
+                    g_printerr("merge move file error: %s\n", err->message);
+                    g_error_free(err);
+                }
+            }
+        } else {
+            if (!g_file_copy(src, dst, flags, NULL, NULL, NULL, &err)) {
+                if (err) {
+                    g_printerr("merge copy file error: %s\n", err->message);
+                    g_error_free(err);
+                }
+            }
+        }
+    }
+}
+
+void aether_clipboard_paste_merge(AetherClipboardController *self,
+                                   const char               *dest_dir)
+{
+    if (!self->paths) return;
+
+    gboolean do_move = (self->op == AETHER_CLIPBOARD_CUT);
+
+    for (int i = 0; self->paths[i]; i++) {
+        GFile *src      = g_file_new_for_path(self->paths[i]);
+        char  *basename = g_path_get_basename(self->paths[i]);
+        char  *dst_path = g_build_filename(dest_dir, basename, NULL);
+        GFile *dst      = g_file_new_for_path(dst_path);
+
+        merge_copy_recursive(src, dst, do_move);
+
+        g_object_unref(src);
+        g_object_unref(dst);
+        g_free(dst_path);
+        g_free(basename);
+    }
+
+    /* مسح الـ clipboard عند القص */
+    if (self->op == AETHER_CLIPBOARD_CUT) {
+        g_strfreev(self->paths);
+        self->paths = NULL;
+        self->op    = AETHER_CLIPBOARD_NONE;
+    }
+}
+

@@ -26,3 +26,13 @@ GPtrArray        *aether_clipboard_find_conflicts    (AetherClipboardController 
 
 /* ينسخ/ينقل مع تغيير أسماء الملفات المتعارضة تلقائياً */
 void              aether_clipboard_paste_keep_both   (AetherClipboardController *self, const char *dest_dir);
+
+/*
+ * لصق مع دمج ذكي للمجلدات المتعارضة:
+ *   - إذا كان المصدر والوجهة كلاهما مجلداً: ادمج المحتوى بشكل تعاودي
+ *     (الملفات في المصدر تُضاف/تُستبدل في الوجهة، وملفات الوجهة التي
+ *     لا توجد في المصدر تبقى كما هي)
+ *   - إذا كان المصدر ملفاً عادياً: استبدله دائماً
+ */
+void              aether_clipboard_paste_merge       (AetherClipboardController *self, const char *dest_dir);
+

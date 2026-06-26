@@ -374,11 +374,15 @@ static void on_conflict_response(GtkDialog *dlg, int response, gpointer user_dat
     gtk_window_destroy(GTK_WINDOW(dlg));
 
     if (response == GTK_RESPONSE_ACCEPT) {
-        /* Replace: لصق مع استبدال */
-        if (win->progress_spinner) gtk_spinner_start(GTK_SPINNER(win->progress_spinner));
-        aether_clipboard_paste_with_flags(win->clipboard, d->dest_dir,
-                                          G_FILE_COPY_OVERWRITE,
-                                          on_paste_done, win);
+        /*
+         * Replace/Merge: استخدم paste_merge بدلاً من paste_with_flags(OVERWRITE).
+         * paste_merge تعمل بشكل تعاودي:
+         *   - الملفات المتشابهة: تُستبدل بالملف الجديد
+         *   - المجلدات المتشابهة: تُدمج محتوياتها (merge)
+         *   - ملفات الوجهة التي لا توجد في المصدر: تبقى كما هي
+         */
+        aether_clipboard_paste_merge(win->clipboard, d->dest_dir);
+        load_directory(win, win->current_path);
     } else if (response == GTK_RESPONSE_YES) {
         /* Keep Both: انسخ مع تغيير الاسم */
         paste_keep_both(win, d->dest_dir);
@@ -428,7 +432,7 @@ static void show_conflict_dialog(AetherWindow *win, const char *dest_dir,
 
     gtk_dialog_add_button(GTK_DIALOG(dlg), "Cancel",       GTK_RESPONSE_CANCEL);
     gtk_dialog_add_button(GTK_DIALOG(dlg), "Keep Both",    GTK_RESPONSE_YES);
-    GtkWidget *replace_btn = gtk_dialog_add_button(GTK_DIALOG(dlg), "Replace", GTK_RESPONSE_ACCEPT);
+    GtkWidget *replace_btn = gtk_dialog_add_button(GTK_DIALOG(dlg), "Replace & Merge", GTK_RESPONSE_ACCEPT);
     gtk_widget_add_css_class(replace_btn, "destructive-action");
     gtk_dialog_set_default_response(GTK_DIALOG(dlg), GTK_RESPONSE_ACCEPT);
 
@@ -585,6 +589,25 @@ void on_remove_bookmark_path_action(GSimpleAction *a, GVariant *p, gpointer ud) 
     load_bookmarks(w);
 }
 
+/*
+ * dnd_is_same_location:
+ * يتحقق هل كل ملفات المصدر موجودة أصلاً في مجلد الوجهة.
+ * إذا كان الجواب نعم → الإفلات في نفس المكان → تجاهل تماماً.
+ *
+ * مثال: المستخدم يسحب file.txt من /home/x/Docs ويفلته في /home/x/Docs
+ *   → parent(src) == dest_dir → نفس المكان → لا شيء
+ */
+static gboolean dnd_is_same_location(GStrv paths, const char *dest_dir) {
+    if (!paths || !dest_dir) return FALSE;
+    for (int i = 0; paths[i]; i++) {
+        char    *parent   = g_path_get_dirname(paths[i]);
+        gboolean same     = (g_strcmp0(parent, dest_dir) == 0);
+        g_free(parent);
+        if (!same) return FALSE;  /* على الأقل ملف واحد من مكان مختلف */
+    }
+    return TRUE; /* كل الملفات من نفس المجلد الوجهة */
+}
+
 gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
                                double x, double y, gpointer ud)
 {
@@ -608,6 +631,15 @@ gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
         GFile *src_file = G_FILE(l->data);
         paths[i++] = g_file_get_path(src_file);
     }
+
+    /*
+     * تحقق من الإفلات في نفس المكان (عملية عبثية):
+     * إذا كانت كل المصادر في نفس مجلد الوجهة → تجاهل بصمت.
+     */
+    if (dnd_is_same_location(paths, w->current_path)) {
+        g_strfreev(paths);
+        return TRUE; /* استُهلك الإفلات بدون تأثير */
+    }
     
     aether_clipboard_set(w->clipboard, paths, op);
     g_strfreev(paths);
@@ -623,6 +655,7 @@ gboolean on_drop_target(GtkDropTarget *t, const GValue *val,
     
     return TRUE;
 }
+
 
 void setup_drag_drop(AetherWindow *self, GtkWidget *view) {
     GtkDropTarget *target = gtk_drop_target_new(GDK_TYPE_FILE_LIST,
@@ -925,7 +958,25 @@ static void on_dnd_conflict_response(GtkDialog *dlg, int response, gpointer user
 void aether_window_handle_dnd_move(AetherWindow *win, const char *dest_path, GPtrArray *src_paths) {
     if (!dest_path || !src_paths || src_paths->len == 0) return;
 
-    /* فحص التعارضات أولاً */
+    /*
+     * تحقق من الإفلات في نفس المكان:
+     * إذا كانت كل ملفات المصدر موجودة مباشرةً في مجلد الوجهة
+     * (أي parent(src) == dest_path) → تجاهل العملية بصمت.
+     */
+    gboolean all_same = TRUE;
+    for (guint i = 0; i < src_paths->len; i++) {
+        const char *src = g_ptr_array_index(src_paths, i);
+        if (!src) continue;
+        char    *parent = g_path_get_dirname(src);
+        gboolean same   = (g_strcmp0(parent, dest_path) == 0);
+        g_free(parent);
+        if (!same) { all_same = FALSE; break; }
+    }
+    if (all_same) {
+        g_ptr_array_free(src_paths, TRUE);
+        return; /* إفلات في نفس المكان — لا شيء يحدث */
+    }
+
     GPtrArray *conflicts = g_ptr_array_new_with_free_func(g_free);
     for (guint i = 0; i < src_paths->len; i++) {
         const char *src_path = g_ptr_array_index(src_paths, i);
