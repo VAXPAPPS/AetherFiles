@@ -421,26 +421,126 @@ typedef struct {
     guint current;
 } AppImageInstallData;
 
-static void create_appimage_desktop_file(const char *appimage_path, const char *app_name) {
-    char *desktop_dir = g_build_filename(g_get_home_dir(), ".local", "share", "applications", NULL);
-    g_mkdir_with_parents(desktop_dir, 0755);
+static void extract_and_integrate_appimage(const char *appimage_path, const char *app_name) {
+    char *temp_dir = g_dir_make_tmp("aether_appimage_XXXXXX", NULL);
     
+    char *apps_dir = g_build_filename(g_get_home_dir(), ".local", "share", "applications", NULL);
+    g_mkdir_with_parents(apps_dir, 0755);
     char *desktop_filename = g_strdup_printf("aether-%s.desktop", app_name);
-    char *desktop_path = g_build_filename(desktop_dir, desktop_filename, NULL);
-    
-    GKeyFile *kf = g_key_file_new();
-    g_key_file_set_string(kf, "Desktop Entry", "Name", app_name);
-    g_key_file_set_string(kf, "Desktop Entry", "Exec", appimage_path);
-    g_key_file_set_string(kf, "Desktop Entry", "Icon", "application-x-executable");
-    g_key_file_set_string(kf, "Desktop Entry", "Type", "Application");
-    g_key_file_set_string(kf, "Desktop Entry", "Categories", "Utility;");
-    
-    g_key_file_save_to_file(kf, desktop_path, NULL);
-    
-    g_key_file_free(kf);
-    g_free(desktop_path);
+    char *final_desktop_path = g_build_filename(apps_dir, desktop_filename, NULL);
     g_free(desktop_filename);
-    g_free(desktop_dir);
+    
+    if (!temp_dir) {
+        goto fallback;
+    }
+
+    /* Extract .desktop */
+    char *cmd_desktop[] = { (char *)appimage_path, "--appimage-extract", "*.desktop", NULL };
+    g_spawn_sync(temp_dir, cmd_desktop, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL, NULL, NULL, NULL);
+
+    /* Extract .DirIcon */
+    char *cmd_icon[] = { (char *)appimage_path, "--appimage-extract", ".DirIcon", NULL };
+    g_spawn_sync(temp_dir, cmd_icon, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL, NULL, NULL, NULL);
+
+    char *sq_root = g_build_filename(temp_dir, "squashfs-root", NULL);
+    char *diricon_path = g_build_filename(sq_root, ".DirIcon", NULL);
+
+    /* Resolve symlink if needed */
+    char *real_icon_path = g_strdup(diricon_path);
+    if (g_file_test(diricon_path, G_FILE_TEST_IS_SYMLINK)) {
+        char *target = g_file_read_link(diricon_path, NULL);
+        if (target) {
+            char *cmd_target[] = { (char *)appimage_path, "--appimage-extract", target, NULL };
+            g_spawn_sync(temp_dir, cmd_target, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL, NULL, NULL, NULL);
+            g_free(real_icon_path);
+            real_icon_path = g_build_filename(sq_root, target, NULL);
+            g_free(target);
+        }
+    }
+
+    /* Find the extracted .desktop file */
+    char *desktop_file = NULL;
+    GDir *dir = g_dir_open(sq_root, 0, NULL);
+    if (dir) {
+        const char *name;
+        while ((name = g_dir_read_name(dir)) != NULL) {
+            if (g_str_has_suffix(name, ".desktop")) {
+                desktop_file = g_build_filename(sq_root, name, NULL);
+                break;
+            }
+        }
+        g_dir_close(dir);
+    }
+
+    char *icons_dir = g_build_filename(g_get_home_dir(), ".local", "share", "icons", NULL);
+    g_mkdir_with_parents(icons_dir, 0755);
+    char *icon_dest_name = g_strdup_printf("aether-%s", app_name);
+    char *icon_dest = NULL;
+    
+    /* If we have the icon, copy it */
+    if (g_file_test(real_icon_path, G_FILE_TEST_EXISTS)) {
+        const char *ext = ".png";
+        if (g_str_has_suffix(real_icon_path, ".svg")) ext = ".svg";
+        
+        char *icon_filename = g_strdup_printf("%s%s", icon_dest_name, ext);
+        icon_dest = g_build_filename(icons_dir, icon_filename, NULL);
+        g_free(icon_filename);
+
+        GFile *f_src = g_file_new_for_path(real_icon_path);
+        GFile *f_dst = g_file_new_for_path(icon_dest);
+        g_file_copy(f_src, f_dst, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, NULL);
+        g_object_unref(f_src);
+        g_object_unref(f_dst);
+    }
+
+    GKeyFile *kf = g_key_file_new();
+    if (desktop_file && g_key_file_load_from_file(kf, desktop_file, G_KEY_FILE_KEEP_COMMENTS, NULL)) {
+        /* Update existing .desktop */
+        g_key_file_set_string(kf, "Desktop Entry", "Exec", appimage_path);
+        if (icon_dest) {
+            g_key_file_set_string(kf, "Desktop Entry", "Icon", icon_dest_name);
+        }
+        g_key_file_save_to_file(kf, final_desktop_path, NULL);
+    } else {
+        goto fallback;
+    }
+
+    g_key_file_free(kf);
+    if (icon_dest) g_free(icon_dest);
+    g_free(icon_dest_name);
+    g_free(icons_dir);
+    if (desktop_file) g_free(desktop_file);
+    g_free(real_icon_path);
+    g_free(diricon_path);
+    g_free(sq_root);
+    g_free(final_desktop_path);
+    g_free(apps_dir);
+    
+    /* Cleanup temp dir */
+    char *rm_cmd[] = { "rm", "-rf", temp_dir, NULL };
+    g_spawn_sync(NULL, rm_cmd, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL, NULL, NULL, NULL);
+    g_free(temp_dir);
+    return;
+
+fallback:
+    /* Fallback generic .desktop */
+    {
+        GKeyFile *kf_fb = g_key_file_new();
+        g_key_file_set_string(kf_fb, "Desktop Entry", "Name", app_name);
+        g_key_file_set_string(kf_fb, "Desktop Entry", "Exec", appimage_path);
+        g_key_file_set_string(kf_fb, "Desktop Entry", "Icon", "application-x-executable");
+        g_key_file_set_string(kf_fb, "Desktop Entry", "Type", "Application");
+        g_key_file_set_string(kf_fb, "Desktop Entry", "Categories", "Utility;");
+        g_key_file_save_to_file(kf_fb, final_desktop_path, NULL);
+        g_key_file_free(kf_fb);
+    }
+    g_free(final_desktop_path);
+    g_free(apps_dir);
+    if (temp_dir) {
+        char *rm_cmd[] = { "rm", "-rf", temp_dir, NULL };
+        g_spawn_sync(NULL, rm_cmd, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL, NULL, NULL, NULL);
+        g_free(temp_dir);
+    }
 }
 
 static void process_next_appimage(AppImageInstallData *data);
@@ -467,7 +567,7 @@ static void on_appimage_copied(GObject *source_object, GAsyncResult *res, gpoint
         char *dot = strrchr(name_no_ext, '.');
         if (dot) *dot = '\0';
         
-        create_appimage_desktop_file(dest_path, name_no_ext);
+        extract_and_integrate_appimage(dest_path, name_no_ext);
         
         g_free(name_no_ext);
         g_free(dest_path);
