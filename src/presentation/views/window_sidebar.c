@@ -1,6 +1,7 @@
 #include "window_private.h"
 #include <glib/gi18n.h>
 #include "../../domain/drive_entity.h"
+#include <glib/gstdio.h>
 
 #define BOOKMARKS_FILE ".config/aetherfiles-bookmarks"
 
@@ -410,6 +411,163 @@ static void show_install_auth_dialog(AetherWindow *win, GPtrArray *deb_paths) {
     gtk_window_present(GTK_WINDOW(dialog));
 }
 
+typedef struct {
+    GPtrArray *appimage_paths;
+    AetherWindow *win;
+    GtkWidget *dialog;
+    GtkWidget *progress_bar;
+    GtkWidget *status_lbl;
+    guint total;
+    guint current;
+} AppImageInstallData;
+
+static void create_appimage_desktop_file(const char *appimage_path, const char *app_name) {
+    char *desktop_dir = g_build_filename(g_get_home_dir(), ".local", "share", "applications", NULL);
+    g_mkdir_with_parents(desktop_dir, 0755);
+    
+    char *desktop_filename = g_strdup_printf("aether-%s.desktop", app_name);
+    char *desktop_path = g_build_filename(desktop_dir, desktop_filename, NULL);
+    
+    GKeyFile *kf = g_key_file_new();
+    g_key_file_set_string(kf, "Desktop Entry", "Name", app_name);
+    g_key_file_set_string(kf, "Desktop Entry", "Exec", appimage_path);
+    g_key_file_set_string(kf, "Desktop Entry", "Icon", "application-x-executable");
+    g_key_file_set_string(kf, "Desktop Entry", "Type", "Application");
+    g_key_file_set_string(kf, "Desktop Entry", "Categories", "Utility;");
+    
+    g_key_file_save_to_file(kf, desktop_path, NULL);
+    
+    g_key_file_free(kf);
+    g_free(desktop_path);
+    g_free(desktop_filename);
+    g_free(desktop_dir);
+}
+
+static void process_next_appimage(AppImageInstallData *data);
+
+static void on_appimage_copied(GObject *source_object, GAsyncResult *res, gpointer user_data) {
+    AppImageInstallData *data = user_data;
+    GFile *src = G_FILE(source_object);
+    GError *err = NULL;
+    
+    g_file_copy_finish(src, res, &err);
+    if (err) {
+        g_printerr("Failed to copy AppImage: %s\n", err->message);
+        g_error_free(err);
+    } else {
+        const char *src_path = g_ptr_array_index(data->appimage_paths, data->current);
+        char *basename = g_path_get_basename(src_path);
+        char *dest_path = g_build_filename(g_get_home_dir(), "Applications", basename, NULL);
+        
+        /* Make executable */
+        g_chmod(dest_path, 0755);
+        
+        /* Create desktop file */
+        char *name_no_ext = g_strdup(basename);
+        char *dot = strrchr(name_no_ext, '.');
+        if (dot) *dot = '\0';
+        
+        create_appimage_desktop_file(dest_path, name_no_ext);
+        
+        g_free(name_no_ext);
+        g_free(dest_path);
+        g_free(basename);
+    }
+    
+    data->current++;
+    process_next_appimage(data);
+}
+
+static void process_next_appimage(AppImageInstallData *data) {
+    if (data->current >= data->total) {
+        if (data->dialog) gtk_window_destroy(GTK_WINDOW(data->dialog));
+        if (data->win && AETHER_IS_WINDOW(data->win)) {
+            aether_app_repository_load_apps(data->win->app_repo);
+            show_apps_view(data->win);
+        }
+        g_ptr_array_free(data->appimage_paths, TRUE);
+        g_free(data);
+        return;
+    }
+    
+    if (data->progress_bar) {
+        double frac = (double)data->current / data->total;
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(data->progress_bar), frac);
+    }
+    
+    const char *src_path = g_ptr_array_index(data->appimage_paths, data->current);
+    char *basename = g_path_get_basename(src_path);
+    char *apps_dir = g_build_filename(g_get_home_dir(), "Applications", NULL);
+    g_mkdir_with_parents(apps_dir, 0755);
+    
+    char *dest_path = g_build_filename(apps_dir, basename, NULL);
+    
+    GFile *src_file = g_file_new_for_path(src_path);
+    GFile *dest_file = g_file_new_for_path(dest_path);
+    
+    /* Update label */
+    if (data->status_lbl) {
+        char *msg = g_strdup_printf("Copying %s...", basename);
+        gtk_label_set_text(GTK_LABEL(data->status_lbl), msg);
+        g_free(msg);
+    }
+    
+    g_file_copy_async(src_file, dest_file, G_FILE_COPY_OVERWRITE, G_PRIORITY_DEFAULT, NULL, NULL, NULL, on_appimage_copied, data);
+    
+    g_object_unref(src_file);
+    g_object_unref(dest_file);
+    g_free(dest_path);
+    g_free(apps_dir);
+    g_free(basename);
+}
+
+static void install_appimages_async(AetherWindow *win, GPtrArray *appimage_paths) {
+    AppImageInstallData *data = g_new0(AppImageInstallData, 1);
+    data->appimage_paths = appimage_paths;
+    data->win = win;
+    data->total = appimage_paths->len;
+    data->current = 0;
+    
+    GtkWidget *dialog = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(dialog), "Installing AppImages");
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(win));
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 360, -1);
+    gtk_window_set_deletable(GTK_WINDOW(dialog), FALSE);
+    
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 16);
+    gtk_widget_set_margin_start(box, 24);
+    gtk_widget_set_margin_end(box, 24);
+    gtk_widget_set_margin_top(box, 24);
+    gtk_widget_set_margin_bottom(box, 24);
+    
+    GtkWidget *icon = gtk_image_new_from_icon_name("system-software-install-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), 48);
+    gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(box), icon);
+    
+    GtkWidget *title = gtk_label_new("Installing AppImages...");
+    gtk_widget_add_css_class(title, "title-4");
+    gtk_widget_set_halign(title, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(box), title);
+    
+    data->progress_bar = gtk_progress_bar_new();
+    gtk_widget_set_hexpand(data->progress_bar, TRUE);
+    gtk_box_append(GTK_BOX(box), data->progress_bar);
+    
+    data->status_lbl = gtk_label_new("Starting...");
+    gtk_widget_add_css_class(data->status_lbl, "dim-label");
+    gtk_widget_set_halign(data->status_lbl, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(box), data->status_lbl);
+    
+    gtk_window_set_child(GTK_WINDOW(dialog), box);
+    gtk_window_present(GTK_WINDOW(dialog));
+    
+    data->dialog = dialog;
+    
+    process_next_appimage(data);
+}
+
 static gboolean on_sidebar_row_drop(GtkDropTarget *target, const GValue *value, double x, double y, gpointer user_data) {
     (void)target; (void)x; (void)y;
     GtkWidget *row = GTK_WIDGET(user_data);
@@ -428,18 +586,27 @@ static gboolean on_sidebar_row_drop(GtkDropTarget *target, const GValue *value, 
     
     if (is_apps) {
         GPtrArray *deb_paths = g_ptr_array_new_with_free_func(g_free);
+        GPtrArray *appimage_paths = g_ptr_array_new_with_free_func(g_free);
+
         for (GSList *l = files; l != NULL; l = l->next) {
             GFile *src = G_FILE(l->data);
             char *path = g_file_get_path(src);
-            if (path && g_str_has_suffix(path, ".deb")) {
+            if (!path) continue;
+            
+            char *lower = g_ascii_strdown(path, -1);
+            if (g_str_has_suffix(lower, ".deb")) {
                 g_ptr_array_add(deb_paths, path);
+            } else if (g_str_has_suffix(lower, ".appimage")) {
+                g_ptr_array_add(appimage_paths, path);
             } else {
                 g_free(path);
             }
+            g_free(lower);
         }
         
+        GtkWidget *win_widget = gtk_widget_get_ancestor(row, AETHER_TYPE_WINDOW);
+        
         if (deb_paths->len > 0) {
-            GtkWidget *win_widget = gtk_widget_get_ancestor(row, AETHER_TYPE_WINDOW);
             if (win_widget) {
                 show_install_auth_dialog(AETHER_WINDOW(win_widget), deb_paths);
             } else {
@@ -447,6 +614,16 @@ static gboolean on_sidebar_row_drop(GtkDropTarget *target, const GValue *value, 
             }
         } else {
             g_ptr_array_free(deb_paths, TRUE);
+        }
+
+        if (appimage_paths->len > 0) {
+            if (win_widget) {
+                install_appimages_async(AETHER_WINDOW(win_widget), appimage_paths);
+            } else {
+                g_ptr_array_free(appimage_paths, TRUE);
+            }
+        } else {
+            g_ptr_array_free(appimage_paths, TRUE);
         }
         
         return success;
