@@ -1,6 +1,7 @@
 #include "application.h"
 #include "views/window.h"
 #include "views/bluetooth_share_dialog.h"
+#include "views/app_chooser_dialog.h"
 #include "controllers/clipboard_controller.h"
 #include "../data/archive_manager.h"
 #include "../data/privileged_file_manager.h"
@@ -41,6 +42,22 @@ static void on_open_action(GSimpleAction *action, GVariant *parameter, gpointer 
     const char *path = g_variant_get_string(parameter, NULL);
     char *uri = g_filename_to_uri(path, NULL, NULL);
     if (uri) { g_app_info_launch_default_for_uri(uri, NULL, NULL); g_free(uri); }
+}
+
+static void on_open_with_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action;
+    AetherApplication *app = AETHER_APPLICATION(user_data);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+
+    const char *path = g_variant_get_string(parameter, NULL);
+    if (!path) return;
+
+    GFile *file = g_file_new_for_path(path);
+    AetherAppChooserDialog *dialog = aether_app_chooser_dialog_new(GTK_WINDOW(win), file);
+    
+    gtk_window_present(GTK_WINDOW(dialog));
+    g_object_unref(file);
 }
 
 /* ── cut / copy ── */
@@ -1106,6 +1123,7 @@ static void aether_application_init(AetherApplication *app) {
 
     struct { const char *name; GCallback cb; const GVariantType *type; } actions[] = {
         { "open",           G_CALLBACK(on_open_action),           G_VARIANT_TYPE_STRING },
+        { "open-with",      G_CALLBACK(on_open_with_action),      G_VARIANT_TYPE_STRING },
         { "cut",            G_CALLBACK(on_cut_action),            NULL },
         { "copy",           G_CALLBACK(on_copy_action),           NULL },
         { "paste",          G_CALLBACK(on_paste_action),          NULL },

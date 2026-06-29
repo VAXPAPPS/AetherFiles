@@ -116,6 +116,11 @@ void on_item_right_clicked(GtkGestureClick *gesture, int n_press,
         GMenuItem *mi = g_menu_item_new("Open", NULL);
         g_menu_item_set_action_and_target_value(mi, "app.open", safe_variant_string(path ? path : ""));
         g_menu_append_item(s1, mi); g_object_unref(mi);
+        
+        mi = g_menu_item_new("Open With...", NULL);
+        g_menu_item_set_action_and_target_value(mi, "app.open-with", safe_variant_string(path ? path : ""));
+        g_menu_append_item(s1, mi); g_object_unref(mi);
+
         g_menu_append_section(menu, NULL, G_MENU_MODEL(s1)); g_object_unref(s1);
 
         /* Clipboard */
