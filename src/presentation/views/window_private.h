@@ -62,6 +62,8 @@ struct _AetherWindow {
     GtkWidget *sort_btn;
     GtkWidget *progress_spinner;
     GtkWidget *btn_hidden;
+    
+    int icon_size;
 
     GFileMonitor *dir_monitor;
 

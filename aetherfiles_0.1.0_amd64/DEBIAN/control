@@ -1,8 +1,0 @@
-Package: aetherfiles
-Version: 0.1.0
-Section: utils
-Priority: optional
-Architecture: amd64
-Maintainer: AetherOS <support@aetheros.com>
-Description: AetherFiles File Manager
- A modern, fast, and elegant file manager for AetherOS.

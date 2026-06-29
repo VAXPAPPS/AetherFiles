@@ -2,5 +2,6 @@
 <gresources>
   <gresource prefix="/com/aetheros/files">
     <file>style.css</file>
+    <file>shortcuts.ui</file>
   </gresource>
 </gresources>

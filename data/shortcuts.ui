@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <object class="GtkShortcutsWindow" id="shortcuts_window">
+    <property name="modal">True</property>
+    <style>
+      <class name="aether-shortcuts-window"/>
+    </style>
+    <child>
+      <object class="GtkShortcutsSection">
+        <property name="section-name">shortcuts</property>
+        <property name="max-height">12</property>
+        
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">File Operations</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Copy</property>
+                <property name="accelerator">&lt;ctrl&gt;c</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Cut</property>
+                <property name="accelerator">&lt;ctrl&gt;x</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Paste</property>
+                <property name="accelerator">&lt;ctrl&gt;v</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Rename</property>
+                <property name="accelerator">F2</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Move to Trash</property>
+                <property name="accelerator">Delete</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Delete Permanently</property>
+                <property name="accelerator">&lt;ctrl&gt;d</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Undo Last Action</property>
+                <property name="accelerator">&lt;ctrl&gt;z</property>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">Navigation &amp; Views</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">New Tab</property>
+                <property name="accelerator">&lt;ctrl&gt;t</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Close Tab</property>
+                <property name="accelerator">&lt;ctrl&gt;w</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Toggle Hidden Files</property>
+                <property name="accelerator">&lt;ctrl&gt;h</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Select All</property>
+                <property name="accelerator">&lt;ctrl&gt;a</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

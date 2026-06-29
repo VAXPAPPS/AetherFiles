@@ -1118,6 +1118,76 @@ static void aether_application_class_init(AetherApplicationClass *klass) {
     ac->startup  = aether_application_startup;
 }
 
+static void on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    AetherApplication *app = AETHER_APPLICATION(user_data);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+    
+    GtkBuilder *builder = gtk_builder_new_from_resource("/com/aetheros/files/shortcuts.ui");
+    if (!builder) {
+        g_printerr("Failed to load shortcuts.ui\n");
+        return;
+    }
+    
+    GObject *shortcuts_window = gtk_builder_get_object(builder, "shortcuts_window");
+    if (shortcuts_window) {
+        gtk_window_set_transient_for(GTK_WINDOW(shortcuts_window), GTK_WINDOW(win));
+        gtk_window_present(GTK_WINDOW(shortcuts_window));
+    }
+    
+    g_object_unref(builder);
+}
+
+static void on_about_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    (void)action; (void)parameter;
+    AetherApplication *app = AETHER_APPLICATION(user_data);
+    AetherWindow *win = get_active_win(G_APPLICATION(app));
+    if (!win) return;
+    
+    GdkTexture *logo = NULL;
+    GError *err = NULL;
+    char *paths[] = {
+        "data/vaxp.png",
+        "../data/vaxp.png",
+        "/usr/share/aetherfiles/data/vaxp.png",
+        NULL
+    };
+    
+    for (int i = 0; paths[i] != NULL; i++) {
+        GFile *f = g_file_new_for_path(paths[i]);
+        if (g_file_query_exists(f, NULL)) {
+            logo = gdk_texture_new_from_file(f, &err);
+            if (err) {
+                g_printerr("Logo load error for %s: %s\n", paths[i], err->message);
+                g_clear_error(&err);
+            }
+        }
+        g_object_unref(f);
+        if (logo) break;
+    }
+    
+    const char *authors[] = { "VAXP Organization", NULL };
+    
+    GtkWidget *about_dialog = gtk_about_dialog_new();
+    gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(about_dialog), "Aether Files");
+    gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(about_dialog), "0.1.0");
+    gtk_about_dialog_set_website(GTK_ABOUT_DIALOG(about_dialog), "https://vaxp.org");
+    gtk_about_dialog_set_website_label(GTK_ABOUT_DIALOG(about_dialog), "vaxp.org");
+    gtk_about_dialog_set_authors(GTK_ABOUT_DIALOG(about_dialog), authors);
+    if (logo) {
+        gtk_about_dialog_set_logo(GTK_ABOUT_DIALOG(about_dialog), GDK_PAINTABLE(logo));
+    }
+    
+    gtk_window_set_transient_for(GTK_WINDOW(about_dialog), GTK_WINDOW(win));
+    gtk_window_set_modal(GTK_WINDOW(about_dialog), TRUE);
+    gtk_widget_add_css_class(about_dialog, "aether-about-dialog");
+    
+    gtk_window_present(GTK_WINDOW(about_dialog));
+                          
+    if (logo) g_object_unref(logo);
+}
+
 static void aether_application_init(AetherApplication *app) {
     app->clipboard = aether_clipboard_controller_new();
 
@@ -1139,6 +1209,8 @@ static void aether_application_init(AetherApplication *app) {
         { "set_background", G_CALLBACK(on_set_background_action), G_VARIANT_TYPE_STRING },
         { "extract",        G_CALLBACK(on_extract_action),        G_VARIANT_TYPE_STRING },
         { "compress",       G_CALLBACK(on_compress_action),       G_VARIANT_TYPE_STRING },
+        { "about",          G_CALLBACK(on_about_action),          NULL },
+        { "shortcuts",      G_CALLBACK(on_shortcuts_action),      NULL },
         { NULL, NULL, NULL }
     };
 

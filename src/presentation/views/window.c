@@ -234,6 +234,83 @@ static void on_select_all_action(GSimpleAction *action, GVariant *parameter, gpo
     on_select_all_clicked(NULL, user_data);
 }
 
+static void on_icon_size_changed(GtkRange *range, gpointer user_data) {
+    AetherWindow *self = AETHER_WINDOW(user_data);
+    int new_size = (int)gtk_range_get_value(range);
+    if (self->icon_size != new_size) {
+        self->icon_size = new_size;
+        
+        GtkSelectionModel *model = gtk_grid_view_get_model(GTK_GRID_VIEW(self->grid_view));
+        if (model) g_object_ref(model);
+        gtk_grid_view_set_model(GTK_GRID_VIEW(self->grid_view), NULL);
+
+        GtkListItemFactory *gf = gtk_signal_list_item_factory_new();
+        g_signal_connect(gf, "setup",   G_CALLBACK(setup_grid_item),  self);
+        g_signal_connect(gf, "bind",    G_CALLBACK(bind_grid_item),   self);
+        g_signal_connect(gf, "unbind",  G_CALLBACK(unbind_grid_item), self);
+        gtk_grid_view_set_factory(GTK_GRID_VIEW(self->grid_view), gf);
+        g_object_unref(gf);
+
+        if (model) {
+            gtk_grid_view_set_model(GTK_GRID_VIEW(self->grid_view), model);
+            g_object_unref(model);
+        }
+    }
+}
+
+static void build_more_popover(AetherWindow *self, GtkWidget *more_btn) {
+    GtkWidget *more_popover = gtk_popover_new();
+    GtkWidget *more_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
+    /* Zoom / Icon Size */
+    GtkWidget *zoom_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_margin_start(zoom_box, 12);
+    gtk_widget_set_margin_end(zoom_box, 12);
+    gtk_widget_set_margin_top(zoom_box, 12);
+    gtk_widget_set_margin_bottom(zoom_box, 12);
+    
+    GtkWidget *zoom_out_btn = gtk_button_new_from_icon_name("zoom-out-symbolic");
+    gtk_widget_add_css_class(zoom_out_btn, "flat");
+    gtk_widget_add_css_class(zoom_out_btn, "circular");
+    
+    GtkWidget *zoom_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 48, 256, 16);
+    gtk_scale_set_draw_value(GTK_SCALE(zoom_scale), FALSE);
+    gtk_range_set_value(GTK_RANGE(zoom_scale), self->icon_size);
+    gtk_widget_set_hexpand(zoom_scale, TRUE);
+    gtk_widget_set_size_request(zoom_scale, 150, -1);
+    g_signal_connect(zoom_scale, "value-changed", G_CALLBACK(on_icon_size_changed), self);
+    
+    GtkWidget *zoom_in_btn = gtk_button_new_from_icon_name("zoom-in-symbolic");
+    gtk_widget_add_css_class(zoom_in_btn, "flat");
+    gtk_widget_add_css_class(zoom_in_btn, "circular");
+    
+    gtk_box_append(GTK_BOX(zoom_box), zoom_out_btn);
+    gtk_box_append(GTK_BOX(zoom_box), zoom_scale);
+    gtk_box_append(GTK_BOX(zoom_box), zoom_in_btn);
+    
+    gtk_box_append(GTK_BOX(more_box), zoom_box);
+    
+    /* Separator */
+    gtk_box_append(GTK_BOX(more_box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    
+    /* Shortcuts */
+    GtkWidget *btn_shortcuts = gtk_button_new_with_label("Keyboard Shortcuts");
+    gtk_widget_add_css_class(btn_shortcuts, "flat");
+    gtk_widget_set_halign(btn_shortcuts, GTK_ALIGN_START);
+    gtk_actionable_set_action_name(GTK_ACTIONABLE(btn_shortcuts), "app.shortcuts");
+    gtk_box_append(GTK_BOX(more_box), btn_shortcuts);
+    
+    /* About */
+    GtkWidget *btn_about = gtk_button_new_with_label("About Aether Files");
+    gtk_widget_add_css_class(btn_about, "flat");
+    gtk_widget_set_halign(btn_about, GTK_ALIGN_START);
+    gtk_actionable_set_action_name(GTK_ACTIONABLE(btn_about), "app.about");
+    gtk_box_append(GTK_BOX(more_box), btn_about);
+
+    gtk_popover_set_child(GTK_POPOVER(more_popover), more_box);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(more_btn), more_popover);
+}
+
 
 
 static void aether_window_init(AetherWindow *self) {
@@ -248,6 +325,7 @@ static void aether_window_init(AetherWindow *self) {
     self->undo_stack     = g_ptr_array_new_with_free_func(undo_entry_free);
     self->redo_stack     = g_ptr_array_new_with_free_func(undo_entry_free);
     self->clipboard      = aether_clipboard_controller_new();
+    self->icon_size      = 64;
 
     /* Tabs array */
     self->tabs = g_array_new(FALSE, TRUE, sizeof(AetherTabSession));
@@ -296,9 +374,9 @@ static void aether_window_init(AetherWindow *self) {
     gtk_widget_add_controller(self->grid_view, GTK_EVENT_CONTROLLER(bg_click_grid));
 
     GtkListItemFactory *gf = gtk_signal_list_item_factory_new();
-    g_signal_connect(gf, "setup",   G_CALLBACK(setup_grid_item),  NULL);
-    g_signal_connect(gf, "bind",    G_CALLBACK(bind_grid_item),   NULL);
-    g_signal_connect(gf, "unbind",  G_CALLBACK(unbind_grid_item), NULL);
+    g_signal_connect(gf, "setup",   G_CALLBACK(setup_grid_item),  self);
+    g_signal_connect(gf, "bind",    G_CALLBACK(bind_grid_item),   self);
+    g_signal_connect(gf, "unbind",  G_CALLBACK(unbind_grid_item), self);
     gtk_grid_view_set_factory(GTK_GRID_VIEW(self->grid_view), gf);
     g_object_unref(gf);
 
@@ -315,9 +393,9 @@ static void aether_window_init(AetherWindow *self) {
     gtk_widget_add_controller(self->list_view, GTK_EVENT_CONTROLLER(bg_click_list));
 
     GtkListItemFactory *lf = gtk_signal_list_item_factory_new();
-    g_signal_connect(lf, "setup",   G_CALLBACK(setup_list_item),  NULL);
-    g_signal_connect(lf, "bind",    G_CALLBACK(bind_list_item),   NULL);
-    g_signal_connect(lf, "unbind",  G_CALLBACK(unbind_list_item), NULL);
+    g_signal_connect(lf, "setup",   G_CALLBACK(setup_list_item),  self);
+    g_signal_connect(lf, "bind",    G_CALLBACK(bind_list_item),   self);
+    g_signal_connect(lf, "unbind",  G_CALLBACK(unbind_list_item), self);
     GtkColumnViewColumn *col = gtk_column_view_column_new("Name", lf);
     gtk_column_view_column_set_expand(col, TRUE);
     gtk_column_view_append_column(GTK_COLUMN_VIEW(self->list_view), col);
@@ -434,6 +512,8 @@ static void aether_window_init(AetherWindow *self) {
     GtkWidget *more_btn = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(more_btn), "view-more-symbolic");
     gtk_widget_add_css_class(more_btn, "flat");
+
+    build_more_popover(self, more_btn);
 
     GtkWidget *sort_popover = gtk_popover_new();
     GtkWidget *sort_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);

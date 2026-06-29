@@ -20,11 +20,11 @@ window.aether-window {
   min-width: 200px;
 }
 
-.aether-sidebar > * {
+.aether-sidebar>* {
   background: transparent;
 }
 
-paned > separator {
+paned>separator {
   background: transparent;
   opacity: 0;
   min-width: 0px;
@@ -209,17 +209,18 @@ gridview {
   padding: 12px;
 }
 
-gridview > child {
+gridview>child {
   border-radius: 10px;
   transition: background 130ms ease;
-  margin: 10px 10px; /* لإعطاء مسافة بصرية قريبة من 5 بكسل بين العناصر */
+  margin: 10px 10px;
+  /* لإعطاء مسافة بصرية قريبة من 5 بكسل بين العناصر */
 }
 
-gridview > child:hover {
+gridview>child:hover {
   background: rgba(94, 196, 255, 0.10);
 }
 
-gridview > child:selected {
+gridview>child:selected {
   background: rgba(94, 196, 255, 0.20);
 }
 
@@ -234,12 +235,12 @@ columnview>child.rubber-hover {
 }
 
 /* File cell inside grid */
-.nautilus-grid-cell {
+.vafile-grid-cell {
   border-radius: 8px;
   padding: 6px 4px;
 }
 
-.nautilus-grid-cell image {
+.vafile-grid-cell image {
   /* Tint folder icons to the light-blue color from the design */
   color: #7DD3F8;
   -gtk-icon-size: 64px;
@@ -260,20 +261,20 @@ columnview>child.rubber-hover {
 /* ── ظل الأيقونات بحسب المسار ── */
 
 /* مسار Root: ظل بنفسجي */
-.path-root .nautilus-grid-cell image {
+.path-root .vafile-grid-cell image {
   filter: drop-shadow(0 2px 10px rgba(168, 85, 247, 0.55));
   color: #c084fc;
 }
 
-.path-root gridview > child:selected {
+.path-root gridview>child:selected {
   background: rgba(168, 85, 247, 0.22);
 }
 
-.path-root gridview > child:hover {
+.path-root gridview>child:hover {
   background: rgba(168, 85, 247, 0.11);
 }
 
-.path-root columnview > child:selected {
+.path-root columnview>child:selected {
   background: rgba(168, 85, 247, 0.22);
 }
 
@@ -287,20 +288,20 @@ columnview>child.rubber-hover {
 }
 
 /* مسار حساس/خطير: ظل أحمر */
-.path-danger .nautilus-grid-cell image {
+.path-danger .vafile-grid-cell image {
   filter: drop-shadow(0 2px 10px rgba(239, 68, 68, 0.60));
   color: #fca5a5;
 }
 
-.path-danger gridview > child:selected {
+.path-danger gridview>child:selected {
   background: rgba(239, 68, 68, 0.20);
 }
 
-.path-danger gridview > child:hover {
+.path-danger gridview>child:hover {
   background: rgba(239, 68, 68, 0.10);
 }
 
-.path-danger columnview > child:selected {
+.path-danger columnview>child:selected {
   background: rgba(239, 68, 68, 0.20);
 }
 
@@ -314,17 +315,36 @@ columnview>child.rubber-hover {
 }
 
 /* شريط المسار يتلوّن أيضاً */
-.path-root .aether-pathbar button:last-child    { color: #c084fc; }
-.path-danger .aether-pathbar button:last-child  { color: #fca5a5; }
-.path-root .aether-pathbar button:hover         { background: rgba(168,85,247,0.15); color: #c084fc; }
-.path-danger .aether-pathbar button:hover       { background: rgba(239,68,68,0.15); color: #fca5a5; }
+.path-root .aether-pathbar button:last-child {
+  color: #c084fc;
+}
+
+.path-danger .aether-pathbar button:last-child {
+  color: #fca5a5;
+}
+
+.path-root .aether-pathbar button:hover {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+}
+
+.path-danger .aether-pathbar button:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
 
 /* مؤشر أمان في شريط الحالة */
-.path-root .aether-statusbar label.path-status    { color: rgba(192,132,252,0.85); }
-.path-danger .aether-statusbar label.path-status  { color: rgba(252,165,165,0.85); font-weight:700; }
+.path-root .aether-statusbar label.path-status {
+  color: rgba(192, 132, 252, 0.85);
+}
+
+.path-danger .aether-statusbar label.path-status {
+  color: rgba(252, 165, 165, 0.85);
+  font-weight: 700;
+}
 
 
-.nautilus-grid-cell label {
+.vafile-grid-cell label {
   color: rgba(210, 230, 255, 0.90);
   font-size: 12px;
   font-weight: 500;
@@ -336,16 +356,16 @@ columnview {
   background: transparent;
 }
 
-columnview > child {
+columnview>child {
   border-radius: 6px;
   transition: background 120ms ease;
 }
 
-columnview > child:hover {
+columnview>child:hover {
   background: rgba(94, 196, 255, 0.08);
 }
 
-columnview > child:selected {
+columnview>child:selected {
   background: rgba(94, 196, 255, 0.18);
 }
 
@@ -398,8 +418,8 @@ scrollbar slider:hover {
 }
 
 /* ---------- Search Bar ---------- */
-searchbar, 
-searchbar > revealer > box {
+searchbar,
+searchbar>revealer>box {
   background: transparent;
   background-color: transparent;
   border: none;
@@ -407,7 +427,7 @@ searchbar > revealer > box {
 }
 
 searchentry,
-searchentry > text {
+searchentry>text {
   background: transparent;
   background-color: transparent;
   border: 1px solid rgba(0, 0, 0, 0.632);
@@ -438,7 +458,8 @@ dialog headerbar {
   border-radius: 16px 16px 0 0;
 }
 
-dialog listbox, .transparent-list {
+dialog listbox,
+.transparent-list {
   background: transparent;
 }
 
@@ -590,7 +611,8 @@ toast {
 }
 
 /* ---------- Drop zones ---------- */
-gridview.drag-over, columnview.drag-over {
+gridview.drag-over,
+columnview.drag-over {
   background: rgba(94, 196, 255, 0.08);
   border: 2px dashed rgba(94, 196, 255, 0.40);
   border-radius: 8px;
@@ -629,4 +651,26 @@ gridview.drag-over, columnview.drag-over {
 /* ---------- Undo / Redo toast area ---------- */
 .aether-toast-overlay {
   background: transparent;
+}
+/* ---------- About Dialog ---------- */
+window.aether-about-dialog {
+  background-color: rgba(0, 0, 0, 0.40);
+}
+
+window.aether-about-dialog headerbar,
+window.aether-shortcuts-window headerbar {
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+  border: none;
+}
+
+window.aether-about-dialog box,
+window.aether-about-dialog scrolledwindow,
+window.aether-about-dialog viewport,
+window.aether-about-dialog list,
+window.aether-about-dialog textview,
+window.aether-about-dialog text,
+window.aether-shortcuts-window {
+  background-color: transparent;
 }

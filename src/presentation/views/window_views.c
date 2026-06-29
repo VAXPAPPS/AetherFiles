@@ -31,19 +31,23 @@ static void on_thumbnail_ready(GObject *source, GAsyncResult *res, gpointer user
 }
 
 void setup_grid_item(GtkSignalListItemFactory *f, GtkListItem *li, gpointer d) {
+    (void)f;
+    AetherWindow *win = AETHER_WINDOW(d);
+    int size = win ? win->icon_size : 64;
+
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_add_css_class(box, "nautilus-grid-cell");
-    gtk_widget_set_size_request(box, 110, 110);
+    gtk_widget_add_css_class(box, "vafile-grid-cell");
+    gtk_widget_set_size_request(box, size + 40, size + 40);
 
     GtkWidget *stack = gtk_stack_new();
     gtk_widget_set_halign(stack, GTK_ALIGN_CENTER);
 
     GtkWidget *icon = gtk_image_new();
-    gtk_image_set_pixel_size(GTK_IMAGE(icon), 64);
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), size);
     gtk_stack_add_named(GTK_STACK(stack), icon, "icon");
     
     GtkWidget *picture = gtk_picture_new();
-    gtk_widget_set_size_request(picture, 64, 64);
+    gtk_widget_set_size_request(picture, size, size);
     gtk_picture_set_can_shrink(GTK_PICTURE(picture), TRUE);
     gtk_picture_set_content_fit(GTK_PICTURE(picture), GTK_CONTENT_FIT_FILL);
     gtk_stack_add_named(GTK_STACK(stack), picture, "thumbnail");
