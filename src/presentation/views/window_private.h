@@ -183,6 +183,9 @@ void close_tab(AetherWindow *self, int idx);
 gboolean on_new_tab_shortcut(GtkWidget *w, GVariant *a, gpointer ud);
 gboolean on_close_tab_shortcut(GtkWidget *w, GVariant *a, gpointer ud);
 
+void load_preferences(AetherWindow *self);
+void save_preferences(AetherWindow *self);
+
 /* window_apps.h included here to avoid circular dependencies if possible, or we just declare functions */
 GtkWidget *setup_apps_view(AetherWindow *self);
 void show_apps_view(AetherWindow *self);

@@ -10,6 +10,39 @@ static void undo_entry_free(gpointer p) {
     g_free(e);
 }
 
+static char *get_settings_path(void) {
+    return g_build_filename(g_get_user_config_dir(), "aetherfiles", "settings.ini", NULL);
+}
+
+void load_preferences(AetherWindow *self) {
+    char *path = get_settings_path();
+    GKeyFile *kf = g_key_file_new();
+    if (g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) {
+        if (g_key_file_has_key(kf, "General", "show_hidden", NULL)) {
+            self->show_hidden = g_key_file_get_boolean(kf, "General", "show_hidden", NULL);
+        }
+        if (g_key_file_has_key(kf, "General", "icon_size", NULL)) {
+            self->icon_size = g_key_file_get_integer(kf, "General", "icon_size", NULL);
+        }
+    }
+    g_key_file_free(kf);
+    g_free(path);
+}
+
+void save_preferences(AetherWindow *self) {
+    char *path = get_settings_path();
+    char *dir = g_path_get_dirname(path);
+    g_mkdir_with_parents(dir, 0700);
+    g_free(dir);
+
+    GKeyFile *kf = g_key_file_new();
+    g_key_file_set_boolean(kf, "General", "show_hidden", self->show_hidden);
+    g_key_file_set_integer(kf, "General", "icon_size", self->icon_size);
+
+    g_key_file_save_to_file(kf, path, NULL);
+    g_key_file_free(kf);
+    g_free(path);
+}
 
 static void load_css(void) {
     GtkCssProvider *provider = gtk_css_provider_new();
@@ -208,6 +241,14 @@ static void on_hidden_toggled(GtkToggleButton *btn, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
     self->show_hidden = gtk_toggle_button_get_active(btn);
     
+    save_preferences(self);
+
+    if (self->show_hidden) {
+        gtk_button_set_icon_name(GTK_BUTTON(btn), "view-reveal-symbolic");
+    } else {
+        gtk_button_set_icon_name(GTK_BUTTON(btn), "view-conceal-symbolic");
+    }
+    
     if (self->name_filter) {
         gtk_filter_changed(GTK_FILTER(self->name_filter), GTK_FILTER_CHANGE_DIFFERENT);
     }
@@ -239,6 +280,8 @@ static void on_icon_size_changed(GtkRange *range, gpointer user_data) {
     int new_size = (int)gtk_range_get_value(range);
     if (self->icon_size != new_size) {
         self->icon_size = new_size;
+        
+        save_preferences(self);
         
         GtkSelectionModel *model = gtk_grid_view_get_model(GTK_GRID_VIEW(self->grid_view));
         if (model) g_object_ref(model);
@@ -326,6 +369,8 @@ static void aether_window_init(AetherWindow *self) {
     self->redo_stack     = g_ptr_array_new_with_free_func(undo_entry_free);
     self->clipboard      = aether_clipboard_controller_new();
     self->icon_size      = 64;
+
+    load_preferences(self);
 
     /* Tabs array */
     self->tabs = g_array_new(FALSE, TRUE, sizeof(AetherTabSession));
@@ -538,8 +583,9 @@ static void aether_window_init(AetherWindow *self) {
     gtk_widget_add_css_class(self->sort_btn, "flat");
 
     self->btn_hidden = gtk_toggle_button_new();
-    gtk_button_set_icon_name(GTK_BUTTON(self->btn_hidden), "view-reveal-symbolic");
+    gtk_button_set_icon_name(GTK_BUTTON(self->btn_hidden), self->show_hidden ? "view-reveal-symbolic" : "view-conceal-symbolic");
     gtk_widget_add_css_class(self->btn_hidden, "flat");
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(self->btn_hidden), self->show_hidden);
     g_signal_connect(self->btn_hidden, "toggled", G_CALLBACK(on_hidden_toggled), self);
 
     self->progress_spinner = gtk_spinner_new();
