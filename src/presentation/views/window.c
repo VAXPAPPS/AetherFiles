@@ -636,10 +636,10 @@ static void aether_window_init(AetherWindow *self) {
     gtk_window_set_titlebar(GTK_WINDOW(self), content_header);
 
     /* ══ Split view ══ */
-    self->split_view = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
-    gtk_paned_set_start_child(GTK_PANED(self->split_view), sidebar_box);
-    gtk_paned_set_end_child(GTK_PANED(self->split_view), content_box);
-    gtk_paned_set_position(GTK_PANED(self->split_view), 240);
+    self->split_view = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_size_request(sidebar_box, 240, -1);
+    gtk_box_append(GTK_BOX(self->split_view), sidebar_box);
+    gtk_box_append(GTK_BOX(self->split_view), content_box);
 
     /* Root background */
     GtkWidget *root_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);

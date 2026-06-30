@@ -125,7 +125,7 @@ void on_new_folder_response(GtkDialog *d, int response_id, gpointer ud) {
 
 void on_btn_toggle_sidebar_toggled(GtkToggleButton *btn, gpointer user_data) {
     AetherWindow *self = AETHER_WINDOW(user_data);
-    GtkWidget *sidebar = gtk_paned_get_start_child(GTK_PANED(self->split_view));
+    GtkWidget *sidebar = gtk_widget_get_first_child(self->split_view);
     if (sidebar) {
         gboolean active = gtk_toggle_button_get_active(btn);
         gtk_widget_set_visible(sidebar, active);
