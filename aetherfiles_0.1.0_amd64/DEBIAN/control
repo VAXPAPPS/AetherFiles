@@ -3,6 +3,6 @@ Version: 0.1.0
 Section: utils
 Priority: optional
 Architecture: amd64
-Maintainer: AetherOS <support@aetheros.com>
-Description: AetherFiles File Manager
+Maintainer: VAXPOS <support@vaxp.org>
+Description: AetherFiles  Manager
  A modern, fast, and elegant file manager for AetherOS.

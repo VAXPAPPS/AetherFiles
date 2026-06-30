@@ -38,10 +38,19 @@ Exec=$APP_NAME %U
 Icon=$APP_NAME
 Terminal=false
 Type=Application
-Categories=System;FileTools;FileManager;Utility;
-Keywords=folder;manager;explore;disk;file;system;browser;
-MimeType=inode/directory;application/x-gnome-saved-search;
+DBusActivatable=true
 StartupNotify=true
+Categories=System;FileTools;FileManager;Utility;GTK;Core;FileManager;
+Keywords=folder;manager;explore;disk;file;system;browser;folder;manager;explore;disk;filesystem;
+MimeType=inode/directory;application/x-gnome-saved-search;inode/directory;application/x-7z-compressed;application/x-7z-compressed-tar;application/x-bzip;application/x-bzip-compressed-tar;application/x-compress;application/x-compressed-tar;application/x-cpio;application/x-gzip;application/x-lha;application/x-lzip;application/x-lzip-compressed-tar;application/x-lzma;application/x-lzma-compressed-tar;application/x-tar;application/x-tarz;application/x-xar;application/x-xz;application/x-xz-compressed-tar;application/zip;application/gzip;application/bzip2;application/x-bzip2-compressed-tar;application/vnd.rar;application/zstd;application/x-zstd-compressed-tar
+StartupNotify=true
+Actions=new-window;
+X-Purism-FormFactor=Workstation;Mobile;
+
+
+[Desktop Action new-window]
+Name=New Window
+Exec=aetherfiles --new-window
 EOF
 chmod 644 "$DEB_DIR/usr/share/applications/$APP_NAME.desktop"
 
@@ -52,8 +61,8 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: $ARCH
-Maintainer: AetherOS <support@aetheros.com>
-Description: AetherFiles File Manager
+Maintainer: VAXPOS <support@vaxp.org>
+Description: AetherFiles  Manager
  A modern, fast, and elegant file manager for AetherOS.
 EOF
 

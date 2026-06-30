@@ -86,6 +86,7 @@ struct _AetherWindow {
      * يمنع race condition بين file monitor وexplicit load.
      */
     guint load_serial;
+    GCancellable *load_cancellable;
 };
 
 

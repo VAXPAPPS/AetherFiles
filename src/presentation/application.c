@@ -1110,12 +1110,30 @@ static void aether_application_finalize(GObject *object) {
     G_OBJECT_CLASS(aether_application_parent_class)->finalize(object);
 }
 
+static void aether_application_open(GApplication *app, GFile **files, int n_files, const char *hint) {
+    (void)hint;
+    GtkWindow *window = gtk_application_get_active_window(GTK_APPLICATION(app));
+    if (!window)
+        window = aether_window_new(AETHER_APPLICATION(app));
+    
+    if (n_files > 0 && files[0]) {
+        char *path = g_file_get_path(files[0]);
+        if (path) {
+            aether_window_load_path(AETHER_WINDOW(window), path);
+            g_free(path);
+        }
+    }
+    
+    gtk_window_present(window);
+}
+
 static void aether_application_class_init(AetherApplicationClass *klass) {
     GObjectClass *oc = G_OBJECT_CLASS(klass);
     oc->finalize = aether_application_finalize;
     GApplicationClass *ac = G_APPLICATION_CLASS(klass);
     ac->activate = aether_application_activate;
     ac->startup  = aether_application_startup;
+    ac->open     = aether_application_open;
 }
 
 static void on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
@@ -1240,6 +1258,6 @@ static void aether_application_init(AetherApplication *app) {
 AetherApplication *aether_application_new(void) {
     return g_object_new(AETHER_TYPE_APPLICATION,
                         "application-id", "com.aetheros.files",
-                        "flags", G_APPLICATION_DEFAULT_FLAGS,
+                        "flags", G_APPLICATION_HANDLES_OPEN,
                         NULL);
 }

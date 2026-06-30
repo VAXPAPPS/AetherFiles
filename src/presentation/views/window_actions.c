@@ -114,9 +114,7 @@ void on_new_folder_response(GtkDialog *d, int response_id, gpointer ud) {
             g_printerr("mkdir error: %s\n", err ? err->message : "?");
             if (err) g_error_free(err);
         }
-    } else {
-        aether_file_repository_list_directory_async(
-            w->repo, w->current_path, NULL, on_directory_loaded, w);
+        aether_window_reload(w);
     }
     g_free(full);
     g_object_unref(dir);
@@ -169,9 +167,9 @@ static void on_new_doc_name_response(GtkDialog *d, int response_id, gpointer ud)
                 g_printerr("template copy error: %s\n", err->message);
                 g_error_free(err);
             }
+            aether_window_reload(ctx->win);
         } else {
-            aether_file_repository_list_directory_async(
-                ctx->win->repo, ctx->win->current_path, NULL, on_directory_loaded, ctx->win);
+            aether_window_reload(ctx->win);
         }
         g_object_unref(src);
         g_object_unref(dest);
@@ -180,8 +178,7 @@ static void on_new_doc_name_response(GtkDialog *d, int response_id, gpointer ud)
         GFileOutputStream *stream = g_file_create(file, G_FILE_CREATE_NONE, NULL, &err);
         if (stream) {
             g_object_unref(stream);
-            aether_file_repository_list_directory_async(
-                ctx->win->repo, ctx->win->current_path, NULL, on_directory_loaded, ctx->win);
+            aether_window_reload(ctx->win);
         } else if (err) {
             if (err->code == G_IO_ERROR_PERMISSION_DENIED && aether_privileged_is_available()) {
                 g_error_free(err);
@@ -579,8 +576,7 @@ gboolean on_key_refresh(GtkWidget *w, GVariant *args, gpointer ud) {
     (void)w; (void)args;
     AetherWindow *self = AETHER_WINDOW(ud);
     if (self->current_path)
-        aether_file_repository_list_directory_async(
-            self->repo, self->current_path, NULL, on_directory_loaded, self);
+        aether_window_reload(self);
     return TRUE;
 }
 
@@ -1223,8 +1219,7 @@ gboolean on_ctrl_h_shortcut(GtkWidget *w, GVariant *a, gpointer ud) {
     AetherWindow *self = AETHER_WINDOW(ud);
     self->show_hidden = !self->show_hidden;
     if (self->current_path)
-        aether_file_repository_list_directory_async(
-            self->repo, self->current_path, NULL, on_directory_loaded, self);
+        aether_window_reload(self);
     return TRUE;
 }
 

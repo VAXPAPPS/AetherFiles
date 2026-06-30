@@ -6,6 +6,7 @@
 G_DECLARE_FINAL_TYPE(AetherWindow, aether_window, AETHER, WINDOW, GtkApplicationWindow)
 
 GtkWindow   *aether_window_new              (AetherApplication *app);
+void         aether_window_load_path        (AetherWindow *self, const char *path);
 const char  *aether_window_get_current_path (AetherWindow *self);
 void         aether_window_reload           (AetherWindow *self);
 GStrv        aether_window_get_selected_paths(AetherWindow *self);

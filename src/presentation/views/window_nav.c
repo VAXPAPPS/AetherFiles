@@ -44,8 +44,7 @@ void load_directory(AetherWindow *self, const char *path) {
     update_path_css_class(self);
     update_pathbar(self);
     update_nav_buttons(self);
-    aether_file_repository_list_directory_async(
-        self->repo, self->current_path, NULL, on_directory_loaded, self);
+    aether_window_reload(self);
 }
 
 void update_nav_buttons(AetherWindow *self) {
@@ -304,6 +303,10 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
     GListModel *raw = aether_file_repository_list_directory_finish(
                           AETHER_FILE_REPOSITORY(source), res, &err);
     if (err) {
+        if (g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+            g_error_free(err);
+            return;
+        }
         /* ── اعتراض خطأ الصلاحيات: اسأل المستخدم فقط عند الحاجة الحقيقية ── */
         if (err->code == G_IO_ERROR_PERMISSION_DENIED &&
             self->current_path &&
@@ -346,9 +349,6 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
     GtkMultiSelection *grid_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
     GtkMultiSelection *list_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
 
-    /* زِد العداد لإبطال أي set_model_idle قديم معلّق في قائمة الانتظار */
-    self->load_serial++;
-
     ModelUpdateData *d = g_new0(ModelUpdateData, 1);
     d->window = self;
     d->grid_sel = grid_sel;
@@ -375,13 +375,13 @@ void on_directory_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
  * يُستدعى تلقائياً عندما يرصد خطأ PERMISSION_DENIED.
  */
 void load_directory_elevated(AetherWindow *self, const char *path) {
-    /* أظهر Spinner للتلميح بأن الطلب جارٍ */
-    if (self->progress_spinner)
-        gtk_spinner_start(GTK_SPINNER(self->progress_spinner));
-
-    aether_privileged_list_async(path, NULL,
-                                  (GAsyncReadyCallback)on_elevated_list_done,
-                                  self);
+    self->elevated_mode = TRUE;
+    
+    char *new_path = g_strdup(path);
+    g_free(self->current_path);
+    self->current_path = new_path;
+    
+    aether_window_reload(self);
 }
 
 /**
@@ -399,9 +399,12 @@ void on_elevated_list_done(GObject *source, GAsyncResult *res, gpointer ud) {
     GListModel *raw = aether_privileged_list_finish(res, &err);
 
     if (err) {
+        if (g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+            g_error_free(err);
+            return;
+        }
         /* المستخدم رفض أو فشلت المصادقة */
-        const char *msg = (err->code == G_IO_ERROR_CANCELLED ||
-                           err->code == G_IO_ERROR_PERMISSION_DENIED)
+        const char *msg = (err->code == G_IO_ERROR_PERMISSION_DENIED)
             ? "Authentication was cancelled or denied."
             : err->message;
 
@@ -433,9 +436,6 @@ void on_elevated_list_done(GObject *source, GAsyncResult *res, gpointer ud) {
 
     GtkMultiSelection *grid_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
     GtkMultiSelection *list_sel = gtk_multi_selection_new(G_LIST_MODEL(g_object_ref(filtered)));
-
-    /* زِد العداد لإبطال أي set_model_idle قديم معلّق */
-    self->load_serial++;
 
     ModelUpdateData *d = g_new0(ModelUpdateData, 1);
     d->window     = self;
@@ -497,8 +497,7 @@ void navigate_back(AetherWindow *self) {
     self->current_path = prev;
     update_pathbar(self);
     update_nav_buttons(self);
-    aether_file_repository_list_directory_async(
-        self->repo, self->current_path, NULL, on_directory_loaded, self);
+    aether_window_reload(self);
 }
 
 void navigate_forward(AetherWindow *self) {
@@ -511,8 +510,7 @@ void navigate_forward(AetherWindow *self) {
     self->current_path = next;
     update_pathbar(self);
     update_nav_buttons(self);
-    aether_file_repository_list_directory_async(
-        self->repo, self->current_path, NULL, on_directory_loaded, self);
+    aether_window_reload(self);
 }
 
 void on_dir_changed(GFileMonitor *mon, GFile *file, GFile *other,
@@ -557,8 +555,7 @@ void on_dir_changed(GFileMonitor *mon, GFile *file, GFile *other,
     case G_FILE_MONITOR_EVENT_MOVED_IN:
     case G_FILE_MONITOR_EVENT_MOVED_OUT:
         if (self->current_path)
-            aether_file_repository_list_directory_async(
-                self->repo, self->current_path, NULL, on_directory_loaded, self);
+            aether_window_reload(self);
         break;
     default:
         break;
@@ -660,5 +657,17 @@ void on_item_activated(GtkWidget *view, guint position, gpointer user_data) {
         }
     }
     g_object_unref(item);
+}
+
+void aether_window_load_path(AetherWindow *self, const char *path) {
+    if (!path) return;
+    char *dir_to_load = NULL;
+    if (g_file_test(path, G_FILE_TEST_IS_DIR)) {
+        dir_to_load = g_strdup(path);
+    } else {
+        dir_to_load = g_path_get_dirname(path);
+    }
+    load_directory(self, dir_to_load);
+    g_free(dir_to_load);
 }
 
